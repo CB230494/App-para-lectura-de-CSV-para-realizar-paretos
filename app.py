@@ -72,17 +72,18 @@ def extract_question_number(text: str) -> str:
 
 def question_sort_key(q):
     """
-    Orden natural para preguntas tipo 12, 12.1, 31.4
+    Orden natural para preguntas tipo 12, 12.1, 31.4.
+    Devuelve una tupla para que pandas pueda ordenar sin error.
     """
     s = str(q).strip()
     parts = s.split(".")
     out = []
     for p in parts:
-        if p.isdigit():
+        if str(p).isdigit():
             out.append(int(p))
         else:
-            out.append(p)
-    return out
+            out.append(str(p))
+    return tuple(out)
 
 
 def is_effectively_empty(value) -> bool:
@@ -421,7 +422,10 @@ def summarize_results(df_results: pd.DataFrame):
     )
 
     summary["sort_key"] = summary["pregunta_num"].apply(question_sort_key)
-    summary = summary.sort_values(["archivo", "sort_key", "pregunta"]).drop(columns=["sort_key"])
+    summary = summary.sort_values(
+        by=["archivo", "sort_key", "pregunta"],
+        kind="stable"
+    ).drop(columns=["sort_key"])
 
     return summary
 
@@ -462,7 +466,10 @@ def build_global_totals(df_results_all: pd.DataFrame) -> pd.DataFrame:
     )
 
     totals["sort_key"] = totals["pregunta_num"].apply(question_sort_key)
-    totals = totals.sort_values(["tipo", "sort_key", "descriptor"]).drop(columns=["sort_key"])
+    totals = totals.sort_values(
+        by=["tipo", "sort_key", "descriptor"],
+        kind="stable"
+    ).drop(columns=["sort_key"])
 
     return totals
 
