@@ -1,587 +1,509 @@
-# app.py — Pareto con gráfico 80/20 real + Portafolio + Unificado + Sheets DB (fixes)
-# -----------------------------------------------------------------------------------
-# Requisitos:
-#   pip install streamlit pandas matplotlib xlsxwriter gspread google-auth
-#   streamlit run app.py
-# -----------------------------------------------------------------------------------
+# app.py
+# -*- coding: utf-8 -*-
 
 import io
-from typing import List, Dict
+import re
+import unicodedata
+from pathlib import Path
+from collections import defaultdict
 
-import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
 
-# ====== Google Sheets (DB) ======
-import gspread
-from google.oauth2.service_account import Credentials
+st.set_page_config(page_title="Conteo de respuestas por pregunta", layout="wide")
 
-# URL de tu hoja (DB)
-SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1cf-avzRjtBXcqr69WfrrsTAegm0PMAe8LgjeLpfcS5g/edit?usp=sharing"
-WS_PARETOS = "paretos"  # hoja donde se guardan los paretos (nombre, descriptor, frecuencia)
 
-st.set_page_config(page_title="Pareto de Descriptores", layout="wide")
+# =========================================================
+# CONFIG
+# =========================================================
+EXCEL_GUIA = "Guía de Preguntas para paretos 2026.xlsx"
 
-# ============================================================================
-# 1) CATÁLOGO EMBEBIDO
-# ============================================================================
-CATALOGO: List[Dict[str, str]] = [
-    {"categoria": "Delito", "descriptor": "Abandono de personas (menor de edad, adulto mayor o con capacidades diferentes)"},
-    {"categoria": "Delito", "descriptor": "Abigeato (robo y destace de ganado)"},
-    {"categoria": "Delito", "descriptor": "Aborto"},
-    {"categoria": "Delito", "descriptor": "Abuso de autoridad"},
-    {"categoria": "Riesgo social", "descriptor": "Accidentes de tránsito"},
-    {"categoria": "Delito", "descriptor": "Accionamiento de arma de fuego (balaceras)"},
-    {"categoria": "Riesgo social", "descriptor": "Acoso escolar (bullying)"},
-    {"categoria": "Riesgo social", "descriptor": "Acoso laboral (mobbing)"},
-    {"categoria": "Riesgo social", "descriptor": "Acoso sexual callejero"},
-    {"categoria": "Riesgo social", "descriptor": "Actos obscenos en vía pública"},
-    {"categoria": "Delito", "descriptor": "Administración fraudulenta, apropiaciones indebidas o enriquecimiento ilícito"},
-    {"categoria": "Delito", "descriptor": "Agresión con armas"},
-    {"categoria": "Riesgo social", "descriptor": "Agrupaciones delincuenciales no organizadas"},
-    {"categoria": "Delito", "descriptor": "Alteración de datos y sabotaje informático"},
-    {"categoria": "Otros factores", "descriptor": "Ambiente laboral inadecuado"},
-    {"categoria": "Delito", "descriptor": "Amenazas"},
-    {"categoria": "Riesgo social", "descriptor": "Analfabetismo"},
-    {"categoria": "Riesgo social", "descriptor": "Bajos salarios"},
-    {"categoria": "Riesgo social", "descriptor": "Barras de fútbol"},
-    {"categoria": "Riesgo social", "descriptor": "Búnker (eje de expendio de drogas)"},
-    {"categoria": "Delito", "descriptor": "Calumnia"},
-    {"categoria": "Delito", "descriptor": "Caza ilegal"},
-    {"categoria": "Delito", "descriptor": "Conducción temeraria"},
-    {"categoria": "Riesgo social", "descriptor": "Consumo de alcohol en vía pública"},
-    {"categoria": "Riesgo social", "descriptor": "Consumo de drogas"},
-    {"categoria": "Riesgo social", "descriptor": "Contaminación sónica"},
-    {"categoria": "Delito", "descriptor": "Contrabando"},
-    {"categoria": "Delito", "descriptor": "Corrupción"},
-    {"categoria": "Delito", "descriptor": "Corrupción policial"},
-    {"categoria": "Delito", "descriptor": "Cultivo de droga (marihuana)"},
-    {"categoria": "Delito", "descriptor": "Daño ambiental"},
-    {"categoria": "Delito", "descriptor": "Daños/vandalismo"},
-    {"categoria": "Riesgo social", "descriptor": "Deficiencia en la infraestructura vial"},
-    {"categoria": "Otros factores", "descriptor": "Deficiencia en la línea 9-1-1"},
-    {"categoria": "Riesgo social", "descriptor": "Deficiencias en el alumbrado público"},
-    {"categoria": "Delito", "descriptor": "Delincuencia organizada"},
-    {"categoria": "Delito", "descriptor": "Delitos contra el ámbito de intimidad (violación de secretos, correspondencia y comunicaciones electrónicas)"},
-    {"categoria": "Delito", "descriptor": "Delitos sexuales"},
-    {"categoria": "Riesgo social", "descriptor": "Desaparición de personas"},
-    {"categoria": "Riesgo social", "descriptor": "Desarticulación interinstitucional"},
-    {"categoria": "Riesgo social", "descriptor": "Desempleo"},
-    {"categoria": "Riesgo social", "descriptor": "Desvinculación estudiantil"},
-    {"categoria": "Delito", "descriptor": "Desobediencia"},
-    {"categoria": "Delito", "descriptor": "Desórdenes en vía pública"},
-    {"categoria": "Delito", "descriptor": "Disturbios (riñas)"},
-    {"categoria": "Riesgo social", "descriptor": "Enfrentamientos estudiantiles"},
-    {"categoria": "Delito", "descriptor": "Estafa o defraudación"},
-    {"categoria": "Delito", "descriptor": "Estupro (delitos sexuales contra menor de edad)"},
-    {"categoria": "Delito", "descriptor": "Evasión y quebrantamiento de pena"},
-    {"categoria": "Delito", "descriptor": "Explosivos"},
-    {"categoria": "Delito", "descriptor": "Extorsión"},
-    {"categoria": "Delito", "descriptor": "Fabricación, producción o reproducción de pornografía"},
-    {"categoria": "Riesgo social", "descriptor": "Facilismo económico"},
-    {"categoria": "Delito", "descriptor": "Falsificación de moneda y otros valores"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de cámaras de seguridad"},
-    {"categoria": "Otros factores", "descriptor": "Falta de capacitación policial"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de control a patentes"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de control fronterizo"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de corresponsabilidad en seguridad"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de cultura vial"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de cultura y compromiso ciudadano"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de educación familiar"},
-    {"categoria": "Otros factores", "descriptor": "Falta de incentivos"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de inversión social"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de legislación de extinción de dominio"},
-    {"categoria": "Otros factores", "descriptor": "Falta de personal administrativo"},
-    {"categoria": "Otros factores", "descriptor": "Falta de personal policial"},
-    {"categoria": "Otros factores", "descriptor": "Falta de policías de tránsito"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de políticas públicas en seguridad"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de presencia policial"},
-    {"categoria": "Riesgo social", "descriptor": "Falta de salubridad pública"},
-    {"categoria": "Riesgo social", "descriptor": "Familias disfuncionales"},
-    {"categoria": "Delito", "descriptor": "Fraude informático"},
-    {"categoria": "Delito", "descriptor": "Grooming"},
-    {"categoria": "Riesgo social", "descriptor": "Hacinamiento carcelario"},
-    {"categoria": "Riesgo social", "descriptor": "Hacinamiento policial"},
-    {"categoria": "Delito", "descriptor": "Homicidio"},
-    {"categoria": "Riesgo social", "descriptor": "Hospedajes ilegales (cuarterías)"},
-    {"categoria": "Delito", "descriptor": "Hurto"},
-    {"categoria": "Otros factores", "descriptor": "Inadecuado uso del recurso policial"},
-    {"categoria": "Riesgo social", "descriptor": "Incumplimiento al plan regulador de la municipalidad"},
-    {"categoria": "Delito", "descriptor": "Incumplimiento del deber alimentario"},
-    {"categoria": "Riesgo social", "descriptor": "Indiferencia social"},
-    {"categoria": "Otros factores", "descriptor": "Inefectividad en el servicio de policía"},
-    {"categoria": "Riesgo social", "descriptor": "Ineficiencia en la administración de justicia"},
-    {"categoria": "Otros factores", "descriptor": "Infraestructura inadecuada"},
-    {"categoria": "Riesgo social", "descriptor": "Intolerancia social"},
-    {"categoria": "Otros factores", "descriptor": "Irrespeto a la jefatura"},
-    {"categoria": "Otros factores", "descriptor": "Irrespeto al subalterno"},
-    {"categoria": "Otros factores", "descriptor": "Jornadas laborales extensas"},
-    {"categoria": "Delito", "descriptor": "Lavado de activos"},
-    {"categoria": "Delito", "descriptor": "Lesiones"},
-    {"categoria": "Delito", "descriptor": "Ley de armas y explosivos N° 7530"},
-    {"categoria": "Riesgo social", "descriptor": "Ley de control de tabaco (Ley 9028)"},
-    {"categoria": "Riesgo social", "descriptor": "Lotes baldíos"},
-    {"categoria": "Delito", "descriptor": "Maltrato animal"},
-    {"categoria": "Delito", "descriptor": "Narcotráfico"},
-    {"categoria": "Riesgo social", "descriptor": "Necesidades básicas insatisfechas"},
-    {"categoria": "Riesgo social", "descriptor": "Percepción de inseguridad"},
-    {"categoria": "Riesgo social", "descriptor": "Pérdida de espacios públicos"},
-    {"categoria": "Riesgo social", "descriptor": "Personas con exceso de tiempo de ocio"},
-    {"categoria": "Riesgo social", "descriptor": "Personas en estado migratorio irregular"},
-    {"categoria": "Riesgo social", "descriptor": "Personas en situación de calle"},
-    {"categoria": "Delito", "descriptor": "Menores en vulnerabilidad"},
-    {"categoria": "Delito", "descriptor": "Pesca ilegal"},
-    {"categoria": "Delito", "descriptor": "Portación ilegal de armas"},
-    {"categoria": "Riesgo social", "descriptor": "Presencia multicultural"},
-    {"categoria": "Otros factores", "descriptor": "Presión por resultados operativos"},
-    {"categoria": "Delito", "descriptor": "Privación de libertad sin ánimo de lucro"},
-    {"categoria": "Riesgo social", "descriptor": "Problemas vecinales"},
-    {"categoria": "Delito", "descriptor": "Receptación"},
-    {"categoria": "Delito", "descriptor": "Relaciones impropias"},
-    {"categoria": "Delito", "descriptor": "Resistencia (irrespeto a la autoridad)"},
-    {"categoria": "Delito", "descriptor": "Robo a comercio (intimidación)"},
-    {"categoria": "Delito", "descriptor": "Robo a comercio (tacha)"},
-    {"categoria": "Delito", "descriptor": "Robo a edificación (tacha)"},
-    {"categoria": "Delito", "descriptor": "Robo a personas"},
-    {"categoria": "Delito", "descriptor": "Robo a transporte comercial"},
-    {"categoria": "Delito", "descriptor": "Robo a vehículos (tacha)"},
-    {"categoria": "Delito", "descriptor": "Robo a vivienda (intimidación)"},
-    {"categoria": "Delito", "descriptor": "Robo a vivienda (tacha)"},
-    {"categoria": "Delito", "descriptor": "Robo de bicicleta"},
-    {"categoria": "Delito", "descriptor": "Robo de cultivos"},
-    {"categoria": "Delito", "descriptor": "Robo de motocicletas/vehículos (bajonazo)"},
-    {"categoria": "Delito", "descriptor": "Robo de vehículos"},
-    {"categoria": "Delito", "descriptor": "Secuestro"},
-    {"categoria": "Delito", "descriptor": "Simulación de delito"},
-    {"categoria": "Riesgo social", "descriptor": "Sistema jurídico desactualizado"},
-    {"categoria": "Riesgo social", "descriptor": "Suicidio"},
-    {"categoria": "Delito", "descriptor": "Sustracción de una persona menor de edad o incapaz"},
-    {"categoria": "Delito", "descriptor": "Tala ilegal"},
-    {"categoria": "Riesgo social", "descriptor": "Tendencia social hacia el delito (pautas de crianza violenta)"},
-    {"categoria": "Riesgo social", "descriptor": "Tenencia de droga"},
-    {"categoria": "Delito", "descriptor": "Tentativa de homicidio"},
-    {"categoria": "Delito", "descriptor": "Terrorismo"},
-    {"categoria": "Riesgo social", "descriptor": "Trabajo informal"},
-    {"categoria": "Delito", "descriptor": "Tráfico de armas"},
-    {"categoria": "Delito", "descriptor": "Tráfico de influencias"},
-    {"categoria": "Riesgo social", "descriptor": "Transporte informal (Uber, porteadores, piratas)"},
-    {"categoria": "Delito", "descriptor": "Trata de personas"},
-    {"categoria": "Delito", "descriptor": "Turbación de actos religiosos y profanaciones"},
-    {"categoria": "Delito", "descriptor": "Uso ilegal de uniformes, insignias o dispositivos policiales"},
-    {"categoria": "Delito", "descriptor": "Usurpación de terrenos (precarios)"},
-    {"categoria": "Delito", "descriptor": "Venta de drogas"},
-    {"categoria": "Riesgo social", "descriptor": "Ventas informales (ambulantes)"},
-    {"categoria": "Riesgo social", "descriptor": "Vigilancia informal"},
-    {"categoria": "Delito", "descriptor": "Violación de domicilio"},
-    {"categoria": "Delito", "descriptor": "Violación de la custodia de las cosas"},
-    {"categoria": "Delito", "descriptor": "Violación de sellos"},
-    {"categoria": "Delito", "descriptor": "Violencia de género"},
-    {"categoria": "Delito", "descriptor": "Violencia intrafamiliar"},
-    {"categoria": "Riesgo social", "descriptor": "Xenofobia"},
-    {"categoria": "Riesgo social", "descriptor": "Zonas de prostitución"},
-    {"categoria": "Riesgo social", "descriptor": "Zonas vulnerables"},
-    {"categoria": "Delito", "descriptor": "Robo a transporte público con intimidación"},
-    {"categoria": "Delito", "descriptor": "Robo de cable"},
-    {"categoria": "Delito", "descriptor": "Explotación sexual infantil"},
-    {"categoria": "Delito", "descriptor": "Explotación laboral infantil"},
-    {"categoria": "Delito", "descriptor": "Tráfico ilegal de personas"},
-    {"categoria": "Riesgo social", "descriptor": "Bares clandestinos"},
-    {"categoria": "Delito", "descriptor": "Robo de combustible"},
-    {"categoria": "Delito", "descriptor": "Femicidio"},
-    {"categoria": "Delito", "descriptor": "Delitos contra la vida (homicidios, heridos)"},
-    {"categoria": "Delito", "descriptor": "Venta y consumo de drogas en vía pública"},
-    {"categoria": "Delito", "descriptor": "Asalto (a personas, comercio, vivienda, transporte público)"},
-    {"categoria": "Delito", "descriptor": "Robo de ganado y agrícola"},
-    {"categoria": "Delito", "descriptor": "Robo de equipo agrícola"},
-]
-# ============================================================================
-# 2) UTILIDADES BASE
-# ============================================================================
-ORANGE = "#FF8C00"
-SKY    = "#87CEEB"
+# Mapeo nombre hoja Excel según tipo de archivo
+SHEET_BY_FILETYPE = {
+    "comunidad": "Comunidad ",
+    "comercio": "Comercio",
+    "policia": "Policia",
+    "policial": "Policia",
+}
 
-def calcular_pareto(df_in: pd.DataFrame) -> pd.DataFrame:
-    df = df_in.copy()
-    df["frecuencia"] = pd.to_numeric(df["frecuencia"], errors="coerce").fillna(0).astype(int)
-    df = df[df["frecuencia"] > 0]
-    if df.empty:
-        return df.assign(porcentaje=0.0, acumulado=0, pct_acum=0.0,
-                         segmento_real="20%", segmento="80%")
-    df = df.sort_values("frecuencia", ascending=False)
-    total = int(df["frecuencia"].sum())
-    df["porcentaje"] = (df["frecuencia"] / total * 100).round(2)
-    df["acumulado"]  = df["frecuencia"].cumsum()
-    df["pct_acum"]   = (df["acumulado"] / total * 100).round(2)
-    df["segmento_real"] = np.where(df["pct_acum"] <= 80.00, "80%", "20%")
-    df["segmento"] = "80%"
-    return df.reset_index(drop=True)
 
-def dibujar_pareto(df_par: pd.DataFrame, titulo: str):
-    if df_par.empty:
-        st.info("Ingresa frecuencias (>0) para ver el gráfico.")
-        return
-    x        = np.arange(len(df_par))
-    freqs    = df_par["frecuencia"].to_numpy()
-    pct_acum = df_par["pct_acum"].to_numpy()
-    colors   = [ORANGE if seg == "80%" else SKY for seg in df_par["segmento_real"]]
-    fig, ax1 = plt.subplots(figsize=(14, 5))
-    ax1.bar(x, freqs, color=colors)
-    ax1.set_ylabel("Frecuencia")
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(df_par["descriptor"].tolist(), rotation=75, ha="right")
-    ax1.set_title(titulo if titulo.strip() else "Pareto — Frecuencia y % acumulado")
-    ax2 = ax1.twinx()
-    ax2.plot(x, pct_acum, marker="o")
-    ax2.set_ylabel("% acumulado")
-    ax2.set_ylim(0, 110)
-    if (df_par["segmento_real"] == "80%").any():
-        cut_idx = np.where(df_par["segmento_real"].to_numpy() == "80%")[0].max()
-        ax1.axvline(cut_idx, linestyle=":", color="k")
-    ax2.axhline(80, linestyle="--")
-    st.pyplot(fig)
+# =========================================================
+# UTILIDADES DE TEXTO
+# =========================================================
+def strip_accents(text: str) -> str:
+    text = unicodedata.normalize("NFD", str(text))
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
 
-def exportar_excel_con_grafico(df_par: pd.DataFrame, titulo: str) -> bytes:
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        hoja = "Pareto"
-        df_x = df_par.copy()
-        df_x["porcentaje"] = (df_x["porcentaje"] / 100.0).round(4)
-        df_x["pct_acum"]   = (df_x["pct_acum"] / 100.0).round(4)
-        df_x = df_x[["categoria", "descriptor", "frecuencia",
-                     "porcentaje", "pct_acum", "acumulado", "segmento"]]
-        df_x.to_excel(writer, sheet_name=hoja, index=False, startrow=0, startcol=0)
-        wb = writer.book; ws = writer.sheets[hoja]
-        pct_fmt = wb.add_format({"num_format": "0.00%"})
-        total_fmt = wb.add_format({"bold": True})
-        ws.set_column("A:A", 18); ws.set_column("B:B", 55); ws.set_column("C:C", 12)
-        ws.set_column("D:D", 12, pct_fmt); ws.set_column("E:E", 18, pct_fmt)
-        ws.set_column("F:F", 12); ws.set_column("G:G", 10)
-        n = len(df_x)
-        cats = f"=Pareto!$B$2:$B${n+1}"; vals = f"=Pareto!$C$2:$C${n+1}"; pcts = f"=Pareto!$E$2:$E${n+1}"
-        total = int(df_par["frecuencia"].sum())
-        ws.write(n + 2, 1, "TOTAL:", total_fmt); ws.write(n + 2, 2, total, total_fmt)
+
+def norm(text) -> str:
+    if text is None:
+        return ""
+    s = str(text).strip().strip("\ufeff")
+    s = s.replace("\n", " ").replace("\r", " ")
+    s = strip_accents(s).lower()
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+
+def slugify(text) -> str:
+    if text is None:
+        return ""
+    s = norm(text)
+    s = re.sub(r"[^\w\s]", "", s, flags=re.UNICODE)
+    s = s.replace("/", " ")
+    s = re.sub(r"\s+", "_", s)
+    s = s.strip("_")
+    return s
+
+
+def extract_question_number(text: str) -> str:
+    """
+    Extrae numeración tipo:
+    12.
+    20.
+    31.4
+    """
+    s = str(text).strip()
+    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*[\.\)]?", s)
+    return m.group(1) if m else ""
+
+
+def is_effectively_empty(value) -> bool:
+    if value is None:
+        return True
+    s = str(value).strip()
+    if s == "":
+        return True
+    if norm(s) in {"nan", "none", "null"}:
+        return True
+    return False
+
+
+# =========================================================
+# DETECCIÓN TIPO DE ARCHIVO
+# =========================================================
+def infer_file_type(filename: str) -> str:
+    name = norm(filename)
+    if "comunidad" in name:
+        return "comunidad"
+    if "comercio" in name:
+        return "comercio"
+    if "policial" in name:
+        return "policial"
+    if "policia" in name:
+        return "policia"
+    return ""
+
+
+# =========================================================
+# LECTURA DEL EXCEL GUÍA
+# =========================================================
+def load_guide_excel(path_excel: str):
+    """
+    Lee el Excel guía y devuelve una estructura:
+    {
+      "Comunidad ": [
+         {
+            "pregunta_num": "12",
+            "pregunta_texto": "...",
+            "descriptor_texto": "...",
+            "descriptor_slug": "..."
+         },
+         ...
+      ],
+      ...
+    }
+    """
+    xls = pd.ExcelFile(path_excel)
+    guide = {}
+
+    for sheet in xls.sheet_names:
+        df = pd.read_excel(path_excel, sheet_name=sheet, header=None)
+        df = df.fillna("")
+
+        rows = []
+        current_question_num = ""
+        current_question_text = ""
+
+        for _, row in df.iterrows():
+            vals = [str(v).strip() for v in row.tolist()]
+            vals_nonempty = [v for v in vals if v and norm(v) not in {"nan", "none"}]
+
+            if not vals_nonempty:
+                continue
+
+            # Tomamos el primer valor no vacío como texto principal
+            first = vals_nonempty[0]
+
+            # Si parece una pregunta numerada, actualizamos contexto
+            qnum = extract_question_number(first)
+            if qnum:
+                current_question_num = qnum
+                current_question_text = first
+
+                # Puede venir descriptor en otra columna de esa misma fila
+                possible_descriptors = vals_nonempty[1:]
+                for desc in possible_descriptors:
+                    desc_clean = str(desc).strip()
+                    if desc_clean:
+                        rows.append({
+                            "pregunta_num": current_question_num,
+                            "pregunta_texto": current_question_text,
+                            "descriptor_texto": desc_clean,
+                            "descriptor_slug": slugify(desc_clean),
+                        })
+                continue
+
+            # Si no es pregunta, lo tomamos como descriptor de la pregunta actual
+            if current_question_num and current_question_text:
+                rows.append({
+                    "pregunta_num": current_question_num,
+                    "pregunta_texto": current_question_text,
+                    "descriptor_texto": first,
+                    "descriptor_slug": slugify(first),
+                })
+
+                # Si hay más columnas con texto, también las agregamos como posibles descriptores
+                for extra in vals_nonempty[1:]:
+                    extra_clean = str(extra).strip()
+                    if extra_clean:
+                        rows.append({
+                            "pregunta_num": current_question_num,
+                            "pregunta_texto": current_question_text,
+                            "descriptor_texto": extra_clean,
+                            "descriptor_slug": slugify(extra_clean),
+                        })
+
+        # Eliminar duplicados exactos
+        dedup = []
+        seen = set()
+        for r in rows:
+            key = (
+                r["pregunta_num"],
+                norm(r["pregunta_texto"]),
+                norm(r["descriptor_texto"]),
+                r["descriptor_slug"],
+            )
+            if key not in seen and r["descriptor_slug"]:
+                seen.add(key)
+                dedup.append(r)
+
+        guide[sheet] = dedup
+
+    return guide
+
+
+# =========================================================
+# LECTURA ROBUSTA CSV SURVEY123
+# =========================================================
+def try_read_csv_bytes(content: bytes) -> pd.DataFrame:
+    """
+    Intenta varias combinaciones de lectura porque los CSV pueden venir
+    con encabezado irregular o formatos complicados.
+    """
+    attempts = [
+        {"sep": ",", "encoding": "utf-8-sig"},
+        {"sep": ",", "encoding": "utf-8"},
+        {"sep": ",", "encoding": "latin-1"},
+        {"sep": ";", "encoding": "utf-8-sig"},
+        {"sep": ";", "encoding": "utf-8"},
+        {"sep": ";", "encoding": "latin-1"},
+    ]
+
+    last_error = None
+
+    for at in attempts:
         try:
-            idxs = np.where(df_par["segmento_real"].to_numpy() == "80%")[0]
-            if len(idxs) > 0:
-                last = int(idxs.max())
-                orange_bg = wb.add_format({"bg_color": ORANGE, "font_color": "#000000"})
-                ws.conditional_format(1, 0, 1 + last, 6, {"type": "no_blanks", "format": orange_bg})
-        except Exception:
-            pass
-        chart = wb.add_chart({"type": "column"})
-        points = [{"fill": {"color": (ORANGE if s == "80%" else SKY)}} for s in df_par["segmento_real"]]
-        chart.add_series({"name": "Frecuencia", "categories": cats, "values": vals, "points": points})
-        line = wb.add_chart({"type": "line"})
-        line.add_series({"name": "% acumulado", "categories": cats, "values": pcts,
-                         "y2_axis": True, "marker": {"type": "circle"}})
-        chart.combine(line)
-        chart.set_y_axis({"name": "Frecuencia"})
-        chart.set_y2_axis({"name": "Porcentaje acumulado",
-                           "min": 0, "max": 1.10, "major_unit": 0.10, "num_format": "0%"})
-        chart.set_title({"name": titulo if titulo.strip() else "PARETO – Frecuencia y % acumulado"})
-        chart.set_legend({"position": "bottom"}); chart.set_size({"width": 1180, "height": 420})
-        ws.insert_chart("I2", chart)
-    return output.getvalue()
+            df = pd.read_csv(io.BytesIO(content), dtype=str, keep_default_na=False, **at)
+            if df.shape[1] > 1:
+                return df.fillna("")
+        except Exception as e:
+            last_error = e
 
-# ============================================================================
-# 3) UTILIDADES DE PORTAFOLIO
-# ============================================================================
-def _map_descriptor_a_categoria() -> Dict[str, str]:
-    df = pd.DataFrame(CATALOGO); return dict(zip(df["descriptor"], df["categoria"]))
-DESC2CAT = _map_descriptor_a_categoria()
+    raise ValueError(f"No se pudo leer el CSV. Error: {last_error}")
 
-def normalizar_freq_map(freq_map: Dict[str, int]) -> Dict[str, int]:
-    out = {}
-    for d, v in (freq_map or {}).items():
-        try:
-            vv = int(pd.to_numeric(v, errors="coerce"))
-            if vv > 0: out[d] = vv
-        except Exception:
-            continue
-    return out
 
-def df_desde_freq_map(freq_map: Dict[str, int]) -> pd.DataFrame:
-    items = []
-    for d, f in normalizar_freq_map(freq_map).items():
-        items.append({"descriptor": d, "categoria": DESC2CAT.get(d, "—"), "frecuencia": int(f)})
-    df = pd.DataFrame(items)
-    if df.empty: return pd.DataFrame(columns=["descriptor", "categoria", "frecuencia"])
+def flatten_multiline_headers(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    En algunos CSV los nombres vienen raros o con textos largos.
+    Aquí solo normalizamos encabezados.
+    """
+    new_cols = []
+    for c in df.columns:
+        s = str(c).replace("\n", " ").replace("\r", " ").strip()
+        s = re.sub(r"\s+", " ", s)
+        new_cols.append(s)
+    df.columns = new_cols
     return df
 
-def combinar_maps(maps: List[Dict[str, int]]) -> Dict[str, int]:
-    total = {}
-    for m in maps:
-        for d, f in normalizar_freq_map(m).items():
-            total[d] = total.get(d, 0) + int(f)
-    return total
 
-def info_pareto(freq_map: Dict[str, int]) -> Dict[str, int]:
-    d = normalizar_freq_map(freq_map); return {"descriptores": len(d), "total": int(sum(d.values()))}
+def find_matching_columns(df: pd.DataFrame, descriptor_slug: str):
+    """
+    Busca columnas del CSV que coincidan razonablemente con el slug del descriptor.
+    """
+    matches = []
 
-# ============================================================================
-# 4) GOOGLE SHEETS HELPERS
-# ============================================================================
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
+    for col in df.columns:
+        cslug = slugify(col)
 
-def _gc():
-    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
-    return gspread.authorize(creds)
+        # coincidencia exacta
+        if cslug == descriptor_slug:
+            matches.append(col)
+            continue
 
-def _open_sheet():
-    gc = _gc(); return gc.open_by_url(SPREADSHEET_URL)
+        # descriptor dentro del nombre de columna
+        if descriptor_slug and descriptor_slug in cslug:
+            matches.append(col)
+            continue
 
-def _ensure_ws(sh, title: str, header: List[str]):
-    try:
-        ws = sh.worksheet(title)
-    except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=title, rows=1000, cols=10)
-        ws.append_row(header); return ws
-    values = ws.get_all_values()
-    if not values:
-        ws.append_row(header)
-    else:
-        first = values[0]
-        if [c.strip().lower() for c in first] != [c.strip().lower() for c in header]:
-            ws.clear(); ws.append_row(header)
-    return ws
+        # nombre columna dentro del descriptor
+        if cslug and cslug in descriptor_slug:
+            matches.append(col)
+            continue
 
-def sheets_cargar_portafolio() -> Dict[str, Dict[str, int]]:
-    try:
-        sh = _open_sheet(); ws = _ensure_ws(sh, WS_PARETOS, ["nombre","descriptor","frecuencia"])
-        rows = ws.get_all_records()
-        port: Dict[str, Dict[str, int]] = {}
-        for r in rows:
-            nom = str(r.get("nombre","")).strip()
-            desc = str(r.get("descriptor","")).strip()
-            freq = int(pd.to_numeric(r.get("frecuencia",0), errors="coerce") or 0)
-            if not nom or not desc or freq <= 0: continue
-            bucket = port.setdefault(nom, {}); bucket[desc] = bucket.get(desc, 0) + freq
-        return port
-    except Exception:
-        return {}
+    return matches
 
-def sheets_guardar_pareto(nombre: str, freq_map: Dict[str, int], sobrescribir: bool = True):
-    sh = _open_sheet()
-    ws = _ensure_ws(sh, WS_PARETOS, ["nombre","descriptor","frecuencia"])
-    if sobrescribir:
-        vals = ws.get_all_values()
-        header = vals[0] if vals else ["nombre","descriptor","frecuencia"]
-        others = [r for r in vals[1:] if (len(r)>0 and r[0].strip().lower()!=nombre.strip().lower())]
-        ws.clear(); ws.update("A1", [header])
-        if others: ws.append_rows(others, value_input_option="RAW")
-    rows_new = [[nombre, d, int(f)] for d, f in normalizar_freq_map(freq_map).items()]
-    if rows_new: ws.append_rows(rows_new, value_input_option="RAW")
-# ============================================================================
-# 5) ESTADO DE SESIÓN (con flag de reseteo)
-# ============================================================================
-st.session_state.setdefault("freq_map", {})
-st.session_state.setdefault("portafolio", {})
-st.session_state.setdefault("msel", [])
-st.session_state.setdefault("reset_after_save", False)
 
-# Cargar portafolio desde Sheets una vez si está vacío
-if not st.session_state["portafolio"]:
-    loaded = sheets_cargar_portafolio()
-    if loaded: st.session_state["portafolio"].update(loaded)
+def count_answers_in_columns(df: pd.DataFrame, cols: list) -> int:
+    """
+    Cuenta respuestas efectivas en las columnas ubicadas para un descriptor.
+    Si una fila marcó valor en cualquiera de esas columnas, cuenta 1.
+    """
+    if not cols:
+        return 0
 
-# ---- APLICAR RESET ANTES DE DIBUJAR WIDGETS ----
-if st.session_state.get("reset_after_save", False):
-    st.session_state["freq_map"] = {}
-    st.session_state["msel"] = []
-    st.session_state.pop("editor_freq", None)
-    st.session_state["reset_after_save"] = False
+    subset = df[cols].copy()
 
-# ============================================================================
-# 6) UI PRINCIPAL
-# ============================================================================
-st.title("Pareto de Descriptores")
+    def row_has_answer(row):
+        for val in row:
+            if not is_effectively_empty(val):
+                sval = norm(val)
+                if sval not in {"0", "false", "no", "n"}:
+                    return True
+        return False
 
-c_t1, c_t2, c_t3 = st.columns([2,1,1])
-with c_t1:
-    titulo = st.text_input("Título del Pareto (opcional)", value="Pareto Comunidad")
-with c_t2:
-    nombre_para_guardar = st.text_input("Nombre para guardar este Pareto", value="Comunidad")
-with c_t3:
-    if st.button("🔄 Recargar portafolio desde Sheets"):
-        st.session_state["portafolio"] = sheets_cargar_portafolio()
-        st.success("Portafolio recargado desde Google Sheets.")
-        st.rerun()
+    return int(subset.apply(row_has_answer, axis=1).sum())
 
-cat_df = pd.DataFrame(CATALOGO).sort_values(["categoria","descriptor"]).reset_index(drop=True)
-opciones = cat_df["descriptor"].tolist()
-seleccion = st.multiselect("1) Escoge uno o varios descriptores", options=opciones,
-                           default=st.session_state["msel"], key="msel")
 
-st.subheader("2) Asigna la frecuencia")
-if seleccion:
-    base = cat_df[cat_df["descriptor"].isin(seleccion)].copy()
-    base["frecuencia"] = [st.session_state["freq_map"].get(d, 0) for d in base["descriptor"]]
+# =========================================================
+# PROCESAMIENTO
+# =========================================================
+def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
+    file_type = infer_file_type(filename)
+    if not file_type:
+        raise ValueError(f"No pude identificar el tipo del archivo: {filename}")
 
-    edit = st.data_editor(
-        base, key="editor_freq", num_rows="fixed", use_container_width=True,
-        column_config={
-            "descriptor": st.column_config.TextColumn("DESCRIPTOR", width="large"),
-            "categoria": st.column_config.TextColumn("CATEGORÍA", width="small"),
-            "frecuencia": st.column_config.NumberColumn("Frecuencia", min_value=0, step=1),
-        },
+    sheet_name = SHEET_BY_FILETYPE[file_type]
+    if sheet_name not in guide:
+        raise ValueError(f"No existe la hoja '{sheet_name}' en el Excel guía.")
+
+    base = guide[sheet_name]
+    df_csv = flatten_multiline_headers(df_csv.copy())
+
+    results = []
+    mapping_info = []
+
+    # Agrupar descriptores por pregunta
+    grouped = defaultdict(list)
+    for r in base:
+        grouped[(r["pregunta_num"], r["pregunta_texto"])].append(r)
+
+    for (preg_num, preg_text), items in grouped.items():
+        for item in items:
+            descriptor = item["descriptor_texto"]
+            descriptor_slug = item["descriptor_slug"]
+
+            matches = find_matching_columns(df_csv, descriptor_slug)
+            count = count_answers_in_columns(df_csv, matches)
+
+            results.append({
+                "archivo": filename,
+                "tipo": file_type,
+                "hoja_excel": sheet_name,
+                "pregunta_num": preg_num,
+                "pregunta": preg_text,
+                "descriptor": descriptor,
+                "columnas_encontradas": " | ".join(matches) if matches else "",
+                "cantidad_respuestas": count,
+            })
+
+            mapping_info.append({
+                "archivo": filename,
+                "tipo": file_type,
+                "pregunta_num": preg_num,
+                "descriptor": descriptor,
+                "descriptor_slug": descriptor_slug,
+                "columnas_encontradas": " | ".join(matches) if matches else "",
+                "mapeado": "Sí" if matches else "No",
+            })
+
+    df_results = pd.DataFrame(results)
+    df_mapping = pd.DataFrame(mapping_info)
+
+    return df_results, df_mapping
+
+
+def summarize_results(df_results: pd.DataFrame):
+    if df_results.empty:
+        return pd.DataFrame()
+
+    summary = (
+        df_results
+        .groupby(["archivo", "tipo", "pregunta_num", "pregunta"], as_index=False)["cantidad_respuestas"]
+        .sum()
+        .sort_values(["archivo", "pregunta_num", "pregunta"])
     )
-    for _, row in edit.iterrows():
-        st.session_state["freq_map"][row["descriptor"]] = int(row["frecuencia"])
-
-    df_in = edit[["descriptor","categoria"]].copy()
-    df_in["frecuencia"] = df_in["descriptor"].map(st.session_state["freq_map"]).fillna(0).astype(int)
-
-    st.subheader("3) Pareto (en edición)")
-    tabla = calcular_pareto(df_in)
-
-    mostrar = tabla.copy()[["categoria","descriptor","frecuencia","porcentaje","pct_acum","acumulado","segmento"]]
-    mostrar = mostrar.rename(columns={"pct_acum": "porcentaje acumulado"})
-    mostrar["porcentaje"] = mostrar["porcentaje"].map(lambda x: f"{x:.2f}%")
-    mostrar["porcentaje acumulado"] = mostrar["porcentaje acumulado"].map(lambda x: f"{x:.2f}%")
-
-    c1, c2 = st.columns([1,1], gap="large")
-    with c1:
-        st.markdown("**Tabla de Pareto**")
-        if not tabla.empty:
-            st.dataframe(mostrar, use_container_width=True, hide_index=True)
-        else:
-            st.info("Ingresa frecuencias (>0) para ver la tabla.")
-    with c2:
-        st.markdown("**Gráfico de Pareto**"); dibujar_pareto(tabla, titulo)
-
-    st.subheader("4) Guardar / Descargar")
-    col_g1, col_g2, _ = st.columns([1,1,2])
-    with col_g1:
-        sobrescribir = st.checkbox("Sobrescribir si existe", value=True)
-        if st.button("💾 Guardar este Pareto"):
-            nombre = nombre_para_guardar.strip()
-            if not nombre:
-                st.warning("Indica un nombre para guardar el Pareto.")
-            else:
-                st.session_state["portafolio"][nombre] = normalizar_freq_map(st.session_state["freq_map"])
-                try:
-                    sheets_guardar_pareto(nombre, st.session_state["freq_map"], sobrescribir=sobrescribir)
-                    st.success(f"Pareto '{nombre}' guardado en Google Sheets y en la sesión.")
-                except Exception as e:
-                    st.warning(f"Se guardó en la sesión, pero hubo un problema con Sheets: {e}")
-                # Activar flag de reseteo y re-ejecutar
-                st.session_state["reset_after_save"] = True
-                st.rerun()
-    with col_g2:
-        if not tabla.empty:
-            st.download_button(
-                "⬇️ Excel del Pareto (edición)",
-                data=exportar_excel_con_grafico(tabla, titulo),
-                file_name=f"pareto_{(nombre_para_guardar or 'edicion').lower().replace(' ','_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-else:
-    st.info("Selecciona al menos un descriptor para continuar. Tus frecuencias se conservarán si luego agregas más descriptores.")
-# ============================================================================
-# 7) PORTAFOLIO, UNIFICADO Y DESCARGAS
-# ============================================================================
-st.markdown("---")
-st.header("📁 Portafolio de Paretos (guardados)")
-
-if not st.session_state["portafolio"]:
-    st.info("Aún no hay paretos guardados. Guarda el primero desde la sección anterior.")
-else:
-    st.subheader("Selecciona paretos para Unificar")
-    nombres = sorted(st.session_state["portafolio"].keys())
-    sel_unif = st.multiselect("Elige 2 o más paretos para combinar (o usa el botón de 'Unificar todos')",
-                              options=nombres, default=[], key="sel_unif")
-
-    c_unif1, c_unif2 = st.columns([1,1])
-    with c_unif1: unificar_todos = st.button("🔗 Unificar TODOS los paretos guardados")
-    with c_unif2: st.caption(f"Total de paretos guardados: **{len(nombres)}**")
-
-    st.markdown("### Paretos guardados")
-    for nom in nombres:
-        freq_map = st.session_state["portafolio"][nom]
-        meta = info_pareto(freq_map)
-        with st.expander(f"🔹 {nom} — {meta['descriptores']} descriptores | Total: {meta['total']}"):
-            df_base = df_desde_freq_map(freq_map)
-            tabla_g = calcular_pareto(df_base)
-
-            mostrar_g = tabla_g.copy()[["categoria","descriptor","frecuencia","porcentaje","pct_acum","acumulado","segmento"]]
-            mostrar_g = mostrar_g.rename(columns={"pct_acum":"porcentaje acumulado"})
-            if not mostrar_g.empty:
-                mostrar_g["porcentaje"] = mostrar_g["porcentaje"].map(lambda x: f"{x:.2f}%")
-                mostrar_g["porcentaje acumulado"] = mostrar_g["porcentaje acumulado"].map(lambda x: f"{x:.2f}%")
+    return summary
 
 
-            cc1, cc2, cc3 = st.columns([1,1,1])
-            with cc1:
-                if not mostrar_g.empty:
-                    st.dataframe(mostrar_g, use_container_width=True, hide_index=True)
-                else:
-                    st.info("Este pareto no tiene frecuencias > 0.")
-            with cc2:
-                st.markdown("**Gráfico**"); dibujar_pareto(tabla_g, f"Pareto — {nom}")
-            with cc3:
-                st.markdown("**Acciones**")
-                if not tabla_g.empty:
-                    st.download_button(
-                        "⬇️ Excel de este Pareto",
-                        data=exportar_excel_con_grafico(tabla_g, f"Pareto — {nom}"),
-                        file_name=f"pareto_{nom.lower().replace(' ','_')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"dl_{nom}",
-                    )
-                if st.button("📥 Cargar este Pareto al editor", key=f"load_{nom}"):
-                    st.session_state["freq_map"] = dict(freq_map)
-                    st.session_state["msel"] = list(freq_map.keys())
-                    st.success(f"Pareto '{nom}' cargado al editor (arriba). Desplázate para editar.")
-                if st.button("🗑️ Eliminar de la sesión", key=f"del_{nom}"):
-                    try:
-                        del st.session_state["portafolio"][nom]
-                        st.warning(f"Pareto '{nom}' eliminado del portafolio de la sesión.")
-                        st.rerun()
-                    except Exception:
-                        st.error("No se pudo eliminar. Intenta de nuevo.")
+# =========================================================
+# EXPORTAR A EXCEL
+# =========================================================
+def to_excel_bytes(dfs: dict) -> bytes:
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        for sheet_name, df in dfs.items():
+            df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+    return output.getvalue()
 
-    st.markdown("---"); st.header("🔗 Pareto Unificado (por filtro o general)")
-    maps_a_unir = []; titulo_unif = ""
-    if unificar_todos and nombres:
-        maps_a_unir = [st.session_state["portafolio"][n] for n in nombres]
-        titulo_unif = "Pareto General (todos los paretos)"
-    elif len(st.session_state.get("sel_unif", [])) >= 2:
-        maps_a_unir = [st.session_state["portafolio"][n] for n in st.session_state["sel_unif"]]
-        titulo_unif = f"Unificado: {', '.join(st.session_state['sel_unif'])}"
-    if maps_a_unir:
-        combinado = combinar_maps(maps_a_unir)
-        df_unif = df_desde_freq_map(combinado)
-        tabla_unif = calcular_pareto(df_unif)
-        mostrar_u = tabla_unif.copy()[["categoria","descriptor","frecuencia","porcentaje","pct_acum","acumulado","segmento"]]
-        mostrar_u = mostrar_u.rename(columns={"pct_acum":"porcentaje acumulado"})
-        if not mostrar_u.empty:
-            mostrar_u["porcentaje"] = mostrar_u["porcentaje"].map(lambda x: f"{x:.2f}%")
-            mostrar_u["porcentaje acumulado"] = mostrar_u["porcentaje acumulado"].map(lambda x: f"{x:.2f}%")
-        cu1, cu2 = st.columns([1,1], gap="large")
-        with cu1:
-            st.markdown("**Tabla Unificada**")
-            if not mostrar_u.empty:
-                st.dataframe(mostrar_u, use_container_width=True, hide_index=True)
-            else:
-                st.info("Sin datos > 0 en la combinación seleccionada.")
-        with cu2:
-            st.markdown("**Gráfico Unificado**"); dibujar_pareto(tabla_unif, titulo_unif or "Pareto Unificado")
-        if not tabla_unif.empty:
-            st.download_button(
-                "⬇️ Descargar Excel del Pareto Unificado",
-                data=exportar_excel_con_grafico(tabla_unif, titulo_unif or "Pareto Unificado"),
-                file_name="pareto_unificado.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_unificado",
-            )
+
+# =========================================================
+# UI
+# =========================================================
+st.title("Conteo de respuestas por pregunta / descriptor")
+st.caption("Carga el Excel guía desde el repositorio y luego sube los CSV de Comunidad, Comercio y Policial.")
+
+with st.sidebar:
+    st.header("Configuración")
+    excel_path = st.text_input("Nombre del Excel guía", value=EXCEL_GUIA)
+    st.info(
+        "El Excel debe estar en la raíz del repositorio.\n\n"
+        "Hojas esperadas:\n"
+        "- Comunidad \n"
+        "- Comercio\n"
+        "- Policia"
+    )
+
+# Cargar guía
+guide = None
+guide_error = None
+try:
+    if Path(excel_path).exists():
+        guide = load_guide_excel(excel_path)
     else:
-        st.info("Selecciona 2+ paretos en el multiselect o usa el botón 'Unificar TODOS'.")
+        guide_error = f"No se encontró el archivo Excel guía: {excel_path}"
+except Exception as e:
+    guide_error = f"Error leyendo el Excel guía: {e}"
 
+col1, col2 = st.columns([1, 1])
 
+with col1:
+    st.subheader("Estado del Excel guía")
+    if guide_error:
+        st.error(guide_error)
+    else:
+        st.success("Excel guía cargado correctamente.")
+        meta_rows = []
+        for sh, rows in guide.items():
+            df_tmp = pd.DataFrame(rows)
+            preguntas = df_tmp["pregunta_num"].nunique() if not df_tmp.empty else 0
+            descriptores = len(df_tmp)
+            meta_rows.append({
+                "hoja": sh,
+                "preguntas_detectadas": preguntas,
+                "descriptores_detectados": descriptores,
+            })
+        st.dataframe(pd.DataFrame(meta_rows), use_container_width=True)
 
+with col2:
+    st.subheader("Subir CSV")
+    uploaded_files = st.file_uploader(
+        "Puedes subir uno o varios CSV",
+        type=["csv"],
+        accept_multiple_files=True
+    )
 
+if guide is None:
+    st.warning("Primero debe estar disponible el Excel guía en el repositorio.")
+    st.stop()
 
+if not uploaded_files:
+    st.info("Sube al menos un CSV para procesar.")
+    st.stop()
 
+all_results = []
+all_mapping = []
+read_errors = []
 
+for file in uploaded_files:
+    try:
+        content = file.read()
+        df_csv = try_read_csv_bytes(content)
+        df_results, df_mapping = build_results_for_file(df_csv, file.name, guide)
+        all_results.append(df_results)
+        all_mapping.append(df_mapping)
+    except Exception as e:
+        read_errors.append({"archivo": file.name, "error": str(e)})
+
+if read_errors:
+    st.subheader("Errores detectados")
+    st.dataframe(pd.DataFrame(read_errors), use_container_width=True)
+
+if not all_results:
+    st.error("No se pudo procesar ningún archivo.")
+    st.stop()
+
+df_results_all = pd.concat(all_results, ignore_index=True)
+df_mapping_all = pd.concat(all_mapping, ignore_index=True)
+df_summary = summarize_results(df_results_all)
+
+# =========================================================
+# VISTAS
+# =========================================================
+tab1, tab2, tab3 = st.tabs(["Resumen por pregunta", "Detalle por descriptor", "Mapeo Excel ↔ CSV"])
+
+with tab1:
+    st.subheader("Resumen por pregunta")
+    st.dataframe(df_summary, use_container_width=True)
+
+    st.markdown("### Filtros")
+    tipos = sorted(df_summary["tipo"].dropna().unique().tolist())
+    preguntas = sorted(df_summary["pregunta_num"].dropna().unique().tolist(), key=lambda x: [int(p) if p.isdigit() else p for p in x.split(".")])
+
+    colf1, colf2 = st.columns(2)
+    with colf1:
+        filtro_tipo = st.multiselect("Tipo", options=tipos, default=tipos)
+    with colf2:
+        filtro_preg = st.multiselect("Pregunta", options=preguntas, default=preguntas)
+
+    df_filtrado = df_summary[
+        df_summary["tipo"].isin(filtro_tipo) &
+        df_summary["pregunta_num"].isin(filtro_preg)
+    ].copy()
+
+    st.dataframe(df_filtrado, use_container_width=True)
+
+with tab2:
+    st.subheader("Detalle por descriptor")
+    st.dataframe(df_results_all, use_container_width=True)
+
+with tab3:
+    st.subheader("Mapeo Excel ↔ CSV")
+    st.dataframe(df_mapping_all, use_container_width=True)
+
+# =========================================================
+# DESCARGA
+# =========================================================
+excel_bytes = to_excel_bytes({
+    "resumen_pregunta": df_summary,
+    "detalle_descriptor": df_results_all,
+    "mapeo_excel_csv": df_mapping_all,
+})
+
+st.download_button(
+    label="Descargar resultados en Excel",
+    data=excel_bytes,
+    file_name="conteo_respuestas_preguntas.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
 
