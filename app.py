@@ -3,6 +3,7 @@
 
 import io
 import re
+import csv
 import unicodedata
 from pathlib import Path
 from collections import defaultdict
@@ -10,15 +11,16 @@ from collections import defaultdict
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Conteo de respuestas por pregunta", layout="wide")
-
+st.set_page_config(
+    page_title="Conteo de respuestas por pregunta / descriptor",
+    layout="wide"
+)
 
 # =========================================================
-# CONFIG
+# CONFIGURACIÓN
 # =========================================================
 EXCEL_GUIA = "Guía de Preguntas para paretos 2026.xlsx"
 
-# Mapeo nombre hoja Excel según tipo de archivo
 SHEET_BY_FILETYPE = {
     "comunidad": "Comunidad ",
     "comercio": "Comercio",
@@ -68,6 +70,21 @@ def extract_question_number(text: str) -> str:
     return m.group(1) if m else ""
 
 
+def question_sort_key(q):
+    """
+    Orden natural para preguntas tipo 12, 12.1, 31.4
+    """
+    s = str(q).strip()
+    parts = s.split(".")
+    out = []
+    for p in parts:
+        if p.isdigit():
+            out.append(int(p))
+        else:
+            out.append(p)
+    return out
+
+
 def is_effectively_empty(value) -> bool:
     if value is None:
         return True
@@ -80,7 +97,7 @@ def is_effectively_empty(value) -> bool:
 
 
 # =========================================================
-# DETECCIÓN TIPO DE ARCHIVO
+# DETECCIÓN DE TIPO DE ARCHIVO
 # =========================================================
 def infer_file_type(filename: str) -> str:
     name = norm(filename)
@@ -132,16 +149,13 @@ def load_guide_excel(path_excel: str):
             if not vals_nonempty:
                 continue
 
-            # Tomamos el primer valor no vacío como texto principal
             first = vals_nonempty[0]
-
-            # Si parece una pregunta numerada, actualizamos contexto
             qnum = extract_question_number(first)
+
             if qnum:
                 current_question_num = qnum
                 current_question_text = first
 
-                # Puede venir descriptor en otra columna de esa misma fila
                 possible_descriptors = vals_nonempty[1:]
                 for desc in possible_descriptors:
                     desc_clean = str(desc).strip()
@@ -154,7 +168,6 @@ def load_guide_excel(path_excel: str):
                         })
                 continue
 
-            # Si no es pregunta, lo tomamos como descriptor de la pregunta actual
             if current_question_num and current_question_text:
                 rows.append({
                     "pregunta_num": current_question_num,
@@ -163,7 +176,6 @@ def load_guide_excel(path_excel: str):
                     "descriptor_slug": slugify(first),
                 })
 
-                # Si hay más columnas con texto, también las agregamos como posibles descriptores
                 for extra in vals_nonempty[1:]:
                     extra_clean = str(extra).strip()
                     if extra_clean:
@@ -174,7 +186,6 @@ def load_guide_excel(path_excel: str):
                             "descriptor_slug": slugify(extra_clean),
                         })
 
-        # Eliminar duplicados exactos
         dedup = []
         seen = set()
         for r in rows:
@@ -194,40 +205,100 @@ def load_guide_excel(path_excel: str):
 
 
 # =========================================================
-# LECTURA ROBUSTA CSV SURVEY123
+# LECTURA ROBUSTA DE CSV
 # =========================================================
+def parse_csv_with_python_engine(content: bytes, encoding: str, delimiter: str):
+    text = content.decode(encoding, errors="replace")
+    rows = []
+
+    reader = csv.reader(
+        io.StringIO(text),
+        delimiter=delimiter,
+        quotechar='"'
+    )
+
+    max_cols = 0
+    for row in reader:
+        rows.append(row)
+        if len(row) > max_cols:
+            max_cols = len(row)
+
+    if not rows or max_cols <= 1:
+        return pd.DataFrame()
+
+    normalized_rows = []
+    for row in rows:
+        if len(row) < max_cols:
+            row = row + [""] * (max_cols - len(row))
+        elif len(row) > max_cols:
+            row = row[:max_cols]
+        normalized_rows.append(row)
+
+    header = normalized_rows[0]
+    data = normalized_rows[1:]
+
+    if not header:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(data, columns=header)
+    return df.fillna("")
+
+
 def try_read_csv_bytes(content: bytes) -> pd.DataFrame:
     """
-    Intenta varias combinaciones de lectura porque los CSV pueden venir
-    con encabezado irregular o formatos complicados.
+    Lectura robusta para CSV de Survey123.
+    Intenta con varios separadores y encodings.
     """
     attempts = [
-        {"sep": ",", "encoding": "utf-8-sig"},
-        {"sep": ",", "encoding": "utf-8"},
-        {"sep": ",", "encoding": "latin-1"},
-        {"sep": ";", "encoding": "utf-8-sig"},
-        {"sep": ";", "encoding": "utf-8"},
-        {"sep": ";", "encoding": "latin-1"},
+        ("utf-8-sig", ","),
+        ("utf-8", ","),
+        ("latin-1", ","),
+        ("utf-8-sig", ";"),
+        ("utf-8", ";"),
+        ("latin-1", ";"),
     ]
 
     last_error = None
 
-    for at in attempts:
+    for encoding, delimiter in attempts:
         try:
-            df = pd.read_csv(io.BytesIO(content), dtype=str, keep_default_na=False, **at)
-            if df.shape[1] > 1:
+            df = parse_csv_with_python_engine(content, encoding, delimiter)
+            if not df.empty and df.shape[1] > 1:
                 return df.fillna("")
         except Exception as e:
             last_error = e
 
+    try:
+        attempts_pd = [
+            {"sep": ",", "encoding": "utf-8-sig"},
+            {"sep": ",", "encoding": "utf-8"},
+            {"sep": ",", "encoding": "latin-1"},
+            {"sep": ";", "encoding": "utf-8-sig"},
+            {"sep": ";", "encoding": "utf-8"},
+            {"sep": ";", "encoding": "latin-1"},
+        ]
+
+        for at in attempts_pd:
+            try:
+                df = pd.read_csv(
+                    io.BytesIO(content),
+                    dtype=str,
+                    keep_default_na=False,
+                    engine="python",
+                    on_bad_lines="skip",
+                    **at
+                )
+                if df.shape[1] > 1:
+                    return df.fillna("")
+            except Exception as e:
+                last_error = e
+    except Exception as e:
+        last_error = e
+
     raise ValueError(f"No se pudo leer el CSV. Error: {last_error}")
 
 
-def flatten_multiline_headers(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    En algunos CSV los nombres vienen raros o con textos largos.
-    Aquí solo normalizamos encabezados.
-    """
+def flatten_headers(df: pd.DataFrame) -> pd.DataFrame:
     new_cols = []
     for c in df.columns:
         s = str(c).replace("\n", " ").replace("\r", " ").strip()
@@ -237,26 +308,23 @@ def flatten_multiline_headers(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# =========================================================
+# MAPEO DESCRIPTOR -> COLUMNAS CSV
+# =========================================================
 def find_matching_columns(df: pd.DataFrame, descriptor_slug: str):
-    """
-    Busca columnas del CSV que coincidan razonablemente con el slug del descriptor.
-    """
     matches = []
 
     for col in df.columns:
         cslug = slugify(col)
 
-        # coincidencia exacta
         if cslug == descriptor_slug:
             matches.append(col)
             continue
 
-        # descriptor dentro del nombre de columna
         if descriptor_slug and descriptor_slug in cslug:
             matches.append(col)
             continue
 
-        # nombre columna dentro del descriptor
         if cslug and cslug in descriptor_slug:
             matches.append(col)
             continue
@@ -266,8 +334,7 @@ def find_matching_columns(df: pd.DataFrame, descriptor_slug: str):
 
 def count_answers_in_columns(df: pd.DataFrame, cols: list) -> int:
     """
-    Cuenta respuestas efectivas en las columnas ubicadas para un descriptor.
-    Si una fila marcó valor en cualquiera de esas columnas, cuenta 1.
+    Si una fila tiene valor en cualquiera de las columnas mapeadas, cuenta 1.
     """
     if not cols:
         return 0
@@ -286,7 +353,7 @@ def count_answers_in_columns(df: pd.DataFrame, cols: list) -> int:
 
 
 # =========================================================
-# PROCESAMIENTO
+# PROCESAMIENTO PRINCIPAL
 # =========================================================
 def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
     file_type = infer_file_type(filename)
@@ -298,12 +365,11 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         raise ValueError(f"No existe la hoja '{sheet_name}' en el Excel guía.")
 
     base = guide[sheet_name]
-    df_csv = flatten_multiline_headers(df_csv.copy())
+    df_csv = flatten_headers(df_csv.copy())
 
     results = []
     mapping_info = []
 
-    # Agrupar descriptores por pregunta
     grouped = defaultdict(list)
     for r in base:
         grouped[(r["pregunta_num"], r["pregunta_texto"])].append(r)
@@ -319,7 +385,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
             results.append({
                 "archivo": filename,
                 "tipo": file_type,
-                "hoja_excel": sheet_name,
+                "hoja_excel": sheet_name.strip(),
                 "pregunta_num": preg_num,
                 "pregunta": preg_text,
                 "descriptor": descriptor,
@@ -331,6 +397,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 "archivo": filename,
                 "tipo": file_type,
                 "pregunta_num": preg_num,
+                "pregunta": preg_text,
                 "descriptor": descriptor,
                 "descriptor_slug": descriptor_slug,
                 "columnas_encontradas": " | ".join(matches) if matches else "",
@@ -351,9 +418,53 @@ def summarize_results(df_results: pd.DataFrame):
         df_results
         .groupby(["archivo", "tipo", "pregunta_num", "pregunta"], as_index=False)["cantidad_respuestas"]
         .sum()
-        .sort_values(["archivo", "pregunta_num", "pregunta"])
     )
+
+    summary["sort_key"] = summary["pregunta_num"].apply(question_sort_key)
+    summary = summary.sort_values(["archivo", "sort_key", "pregunta"]).drop(columns=["sort_key"])
+
     return summary
+
+
+def build_guide_summary(guide: dict) -> pd.DataFrame:
+    rows = []
+
+    for sh, items in guide.items():
+        if not items:
+            rows.append({
+                "hoja": sh.strip(),
+                "preguntas_detectadas": 0,
+                "descriptores_detectados": 0,
+            })
+            continue
+
+        df_tmp = pd.DataFrame(items)
+        preguntas = df_tmp["pregunta_num"].nunique()
+        descriptores = len(df_tmp)
+
+        rows.append({
+            "hoja": sh.strip(),
+            "preguntas_detectadas": preguntas,
+            "descriptores_detectados": descriptores,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def build_global_totals(df_results_all: pd.DataFrame) -> pd.DataFrame:
+    if df_results_all.empty:
+        return pd.DataFrame()
+
+    totals = (
+        df_results_all
+        .groupby(["tipo", "pregunta_num", "pregunta", "descriptor"], as_index=False)["cantidad_respuestas"]
+        .sum()
+    )
+
+    totals["sort_key"] = totals["pregunta_num"].apply(question_sort_key)
+    totals = totals.sort_values(["tipo", "sort_key", "descriptor"]).drop(columns=["sort_key"])
+
+    return totals
 
 
 # =========================================================
@@ -368,7 +479,7 @@ def to_excel_bytes(dfs: dict) -> bytes:
 
 
 # =========================================================
-# UI
+# INTERFAZ
 # =========================================================
 st.title("Conteo de respuestas por pregunta / descriptor")
 st.caption("Carga el Excel guía desde el repositorio y luego sube los CSV de Comunidad, Comercio y Policial.")
@@ -379,14 +490,14 @@ with st.sidebar:
     st.info(
         "El Excel debe estar en la raíz del repositorio.\n\n"
         "Hojas esperadas:\n"
-        "- Comunidad \n"
+        "- Comunidad\n"
         "- Comercio\n"
         "- Policia"
     )
 
-# Cargar guía
 guide = None
 guide_error = None
+
 try:
     if Path(excel_path).exists():
         guide = load_guide_excel(excel_path)
@@ -403,17 +514,7 @@ with col1:
         st.error(guide_error)
     else:
         st.success("Excel guía cargado correctamente.")
-        meta_rows = []
-        for sh, rows in guide.items():
-            df_tmp = pd.DataFrame(rows)
-            preguntas = df_tmp["pregunta_num"].nunique() if not df_tmp.empty else 0
-            descriptores = len(df_tmp)
-            meta_rows.append({
-                "hoja": sh,
-                "preguntas_detectadas": preguntas,
-                "descriptores_detectados": descriptores,
-            })
-        st.dataframe(pd.DataFrame(meta_rows), use_container_width=True)
+        st.dataframe(build_guide_summary(guide), use_container_width=True)
 
 with col2:
     st.subheader("Subir CSV")
@@ -439,11 +540,18 @@ for file in uploaded_files:
     try:
         content = file.read()
         df_csv = try_read_csv_bytes(content)
+        df_csv = flatten_headers(df_csv)
+
         df_results, df_mapping = build_results_for_file(df_csv, file.name, guide)
+
         all_results.append(df_results)
         all_mapping.append(df_mapping)
+
     except Exception as e:
-        read_errors.append({"archivo": file.name, "error": str(e)})
+        read_errors.append({
+            "archivo": file.name,
+            "error": str(e)
+        })
 
 if read_errors:
     st.subheader("Errores detectados")
@@ -456,48 +564,97 @@ if not all_results:
 df_results_all = pd.concat(all_results, ignore_index=True)
 df_mapping_all = pd.concat(all_mapping, ignore_index=True)
 df_summary = summarize_results(df_results_all)
+df_totals = build_global_totals(df_results_all)
 
 # =========================================================
-# VISTAS
+# FILTROS
 # =========================================================
-tab1, tab2, tab3 = st.tabs(["Resumen por pregunta", "Detalle por descriptor", "Mapeo Excel ↔ CSV"])
+st.markdown("## Filtros")
+
+colf1, colf2, colf3 = st.columns(3)
+
+tipos = sorted(df_results_all["tipo"].dropna().unique().tolist())
+preguntas = sorted(df_results_all["pregunta_num"].dropna().unique().tolist(), key=question_sort_key)
+archivos = sorted(df_results_all["archivo"].dropna().unique().tolist())
+
+with colf1:
+    filtro_tipo = st.multiselect("Tipo", options=tipos, default=tipos)
+
+with colf2:
+    filtro_pregunta = st.multiselect("Pregunta", options=preguntas, default=preguntas)
+
+with colf3:
+    filtro_archivo = st.multiselect("Archivo", options=archivos, default=archivos)
+
+df_summary_f = df_summary[
+    df_summary["tipo"].isin(filtro_tipo) &
+    df_summary["pregunta_num"].isin(filtro_pregunta) &
+    df_summary["archivo"].isin(filtro_archivo)
+].copy()
+
+df_results_f = df_results_all[
+    df_results_all["tipo"].isin(filtro_tipo) &
+    df_results_all["pregunta_num"].isin(filtro_pregunta) &
+    df_results_all["archivo"].isin(filtro_archivo)
+].copy()
+
+df_mapping_f = df_mapping_all[
+    df_mapping_all["tipo"].isin(filtro_tipo) &
+    df_mapping_all["pregunta_num"].isin(filtro_pregunta) &
+    df_mapping_all["archivo"].isin(filtro_archivo)
+].copy()
+
+df_totals_f = df_totals[
+    df_totals["tipo"].isin(filtro_tipo) &
+    df_totals["pregunta_num"].isin(filtro_pregunta)
+].copy()
+
+# =========================================================
+# MÉTRICAS
+# =========================================================
+st.markdown("## Resumen general")
+
+m1, m2, m3, m4 = st.columns(4)
+
+m1.metric("Archivos procesados", len(df_results_all["archivo"].unique()))
+m2.metric("Preguntas detectadas", len(df_results_all["pregunta_num"].unique()))
+m3.metric("Descriptores evaluados", len(df_results_all))
+m4.metric("Descriptores mapeados", int((df_mapping_all["mapeado"] == "Sí").sum()))
+
+# =========================================================
+# TABS
+# =========================================================
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Resumen por pregunta",
+    "Totales por descriptor",
+    "Detalle por archivo",
+    "Mapeo Excel ↔ CSV"
+])
 
 with tab1:
     st.subheader("Resumen por pregunta")
-    st.dataframe(df_summary, use_container_width=True)
-
-    st.markdown("### Filtros")
-    tipos = sorted(df_summary["tipo"].dropna().unique().tolist())
-    preguntas = sorted(df_summary["pregunta_num"].dropna().unique().tolist(), key=lambda x: [int(p) if p.isdigit() else p for p in x.split(".")])
-
-    colf1, colf2 = st.columns(2)
-    with colf1:
-        filtro_tipo = st.multiselect("Tipo", options=tipos, default=tipos)
-    with colf2:
-        filtro_preg = st.multiselect("Pregunta", options=preguntas, default=preguntas)
-
-    df_filtrado = df_summary[
-        df_summary["tipo"].isin(filtro_tipo) &
-        df_summary["pregunta_num"].isin(filtro_preg)
-    ].copy()
-
-    st.dataframe(df_filtrado, use_container_width=True)
+    st.dataframe(df_summary_f, use_container_width=True)
 
 with tab2:
-    st.subheader("Detalle por descriptor")
-    st.dataframe(df_results_all, use_container_width=True)
+    st.subheader("Total global por descriptor")
+    st.dataframe(df_totals_f, use_container_width=True)
 
 with tab3:
+    st.subheader("Detalle por archivo / descriptor")
+    st.dataframe(df_results_f, use_container_width=True)
+
+with tab4:
     st.subheader("Mapeo Excel ↔ CSV")
-    st.dataframe(df_mapping_all, use_container_width=True)
+    st.dataframe(df_mapping_f, use_container_width=True)
 
 # =========================================================
 # DESCARGA
 # =========================================================
 excel_bytes = to_excel_bytes({
-    "resumen_pregunta": df_summary,
-    "detalle_descriptor": df_results_all,
-    "mapeo_excel_csv": df_mapping_all,
+    "resumen_pregunta": df_summary_f,
+    "totales_descriptor": df_totals_f,
+    "detalle_archivo": df_results_f,
+    "mapeo_excel_csv": df_mapping_f,
 })
 
 st.download_button(
@@ -506,4 +663,3 @@ st.download_button(
     file_name="conteo_respuestas_preguntas.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
-
