@@ -50,55 +50,6 @@ OPCIONES_NO_PRODUCTIVAS = {
 }
 
 # =========================================================
-# ESTILOS
-# =========================================================
-st.markdown("""
-<style>
-.big-card {
-    border: 1px solid rgba(250,250,250,0.12);
-    border-radius: 16px;
-    padding: 18px 20px;
-    margin-bottom: 14px;
-    background: rgba(255,255,255,0.02);
-}
-.big-question {
-    font-size: 1.08rem;
-    font-weight: 700;
-    margin-bottom: 8px;
-}
-.big-meta {
-    font-size: 0.92rem;
-    opacity: 0.85;
-    margin-bottom: 10px;
-}
-.big-descriptor-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 10px 0;
-    border-top: 1px solid rgba(250,250,250,0.08);
-}
-.big-descriptor-row:first-child {
-    border-top: none;
-}
-.big-descriptor-name {
-    font-size: 1.02rem;
-    font-weight: 500;
-}
-.big-descriptor-count {
-    font-size: 1.15rem;
-    font-weight: 800;
-    white-space: nowrap;
-}
-.section-title {
-    font-size: 1.15rem;
-    font-weight: 700;
-    margin: 12px 0 8px 0;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# =========================================================
 # UTILIDADES DE TEXTO
 # =========================================================
 def strip_accents(text: str) -> str:
@@ -758,24 +709,18 @@ def render_descriptor_cards(df: pd.DataFrame):
     )
 
     for (tipo, pregunta_num, pregunta), subdf in grouped:
-        html_rows = ""
-        for _, row in subdf.iterrows():
-            html_rows += f"""
-            <div class="big-descriptor-row">
-                <div class="big-descriptor-name">{row['descriptor']}</div>
-                <div class="big-descriptor-count">{int(row['cantidad_respuestas'])}</div>
-            </div>
-            """
+        st.markdown(f"### Pregunta {pregunta_num}")
+        st.markdown(f"**Tipo:** {tipo}")
+        st.markdown(f"**Pregunta:** {pregunta}")
 
-        html = f"""
-        <div class="big-card">
-            <div class="big-question">Pregunta {pregunta_num}</div>
-            <div class="big-meta"><strong>Tipo:</strong> {tipo}</div>
-            <div class="big-meta">{pregunta}</div>
-            {html_rows}
-        </div>
-        """
-        st.markdown(html, unsafe_allow_html=True)
+        for _, row in subdf.iterrows():
+            c1, c2 = st.columns([6, 1])
+            with c1:
+                st.markdown(f"**{row['descriptor']}**")
+            with c2:
+                st.markdown(f"### {int(row['cantidad_respuestas'])}")
+
+        st.divider()
 
 
 # =========================================================
