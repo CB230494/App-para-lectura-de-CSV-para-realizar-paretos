@@ -50,6 +50,55 @@ OPCIONES_NO_PRODUCTIVAS = {
 }
 
 # =========================================================
+# ESTILOS
+# =========================================================
+st.markdown("""
+<style>
+.big-card {
+    border: 1px solid rgba(250,250,250,0.12);
+    border-radius: 16px;
+    padding: 18px 20px;
+    margin-bottom: 14px;
+    background: rgba(255,255,255,0.02);
+}
+.big-question {
+    font-size: 1.08rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+.big-meta {
+    font-size: 0.92rem;
+    opacity: 0.85;
+    margin-bottom: 10px;
+}
+.big-descriptor-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 0;
+    border-top: 1px solid rgba(250,250,250,0.08);
+}
+.big-descriptor-row:first-child {
+    border-top: none;
+}
+.big-descriptor-name {
+    font-size: 1.02rem;
+    font-weight: 500;
+}
+.big-descriptor-count {
+    font-size: 1.15rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+.section-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 12px 0 8px 0;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# =========================================================
 # UTILIDADES DE TEXTO
 # =========================================================
 def strip_accents(text: str) -> str:
@@ -79,9 +128,6 @@ def slugify(text) -> str:
 
 
 def normalize_option_token(text) -> str:
-    """
-    Normaliza opciones del CSV y del Excel para compararlas.
-    """
     s = slugify(text)
     s = re.sub(r"_+", "_", s).strip("_")
     return s
@@ -132,20 +178,6 @@ def infer_file_type(filename: str) -> str:
 # LECTURA DEL EXCEL GUÍA
 # =========================================================
 def load_guide_excel(path_excel: str):
-    """
-    Devuelve:
-    {
-      hoja: [
-        {
-          pregunta_num,
-          pregunta_texto,
-          pregunta_slug,
-          descriptor_texto,
-          descriptor_slug
-        }
-      ]
-    }
-    """
     xls = pd.ExcelFile(path_excel)
     guide = {}
 
@@ -171,8 +203,7 @@ def load_guide_excel(path_excel: str):
                 current_question_num = qnum
                 current_question_text = first
 
-                possible_descriptors = vals_nonempty[1:]
-                for desc in possible_descriptors:
+                for desc in vals_nonempty[1:]:
                     desc_clean = str(desc).strip()
                     if desc_clean:
                         rows.append({
@@ -304,32 +335,27 @@ def try_read_csv_bytes(content: bytes) -> pd.DataFrame:
         except Exception as e:
             last_error = e
 
-    try:
-        attempts_pd = [
-            {"sep": ",", "encoding": "utf-8-sig"},
-            {"sep": ",", "encoding": "utf-8"},
-            {"sep": ",", "encoding": "latin-1"},
-            {"sep": ";", "encoding": "utf-8-sig"},
-            {"sep": ";", "encoding": "utf-8"},
-            {"sep": ";", "encoding": "latin-1"},
-        ]
-
-        for at in attempts_pd:
-            try:
-                df = pd.read_csv(
-                    io.BytesIO(content),
-                    dtype=str,
-                    keep_default_na=False,
-                    engine="python",
-                    on_bad_lines="skip",
-                    **at
-                )
-                if df.shape[1] > 1:
-                    return df.fillna("")
-            except Exception as e:
-                last_error = e
-    except Exception as e:
-        last_error = e
+    for at in [
+        {"sep": ",", "encoding": "utf-8-sig"},
+        {"sep": ",", "encoding": "utf-8"},
+        {"sep": ",", "encoding": "latin-1"},
+        {"sep": ";", "encoding": "utf-8-sig"},
+        {"sep": ";", "encoding": "utf-8"},
+        {"sep": ";", "encoding": "latin-1"},
+    ]:
+        try:
+            df = pd.read_csv(
+                io.BytesIO(content),
+                dtype=str,
+                keep_default_na=False,
+                engine="python",
+                on_bad_lines="skip",
+                **at
+            )
+            if df.shape[1] > 1:
+                return df.fillna("")
+        except Exception as e:
+            last_error = e
 
     raise ValueError(f"No se pudo leer el CSV. Error: {last_error}")
 
@@ -354,36 +380,7 @@ def build_question_groups(guide_sheet_rows: list):
     return grouped
 
 
-def question_header_candidates(question_num: str, question_text: str):
-    """
-    Genera candidatos para encontrar la columna de la pregunta en el CSV.
-    """
-    qnorm = norm(question_text)
-    qslug = normalize_option_token(question_text)
-
-    candidates = set()
-
-    if question_num:
-        candidates.add(question_num)
-        candidates.add(f"{question_num}.")
-        candidates.add(f"{question_num})")
-
-    candidates.add(qnorm)
-    candidates.add(qslug)
-
-    # Agrega versión del texto sin el número
-    text_wo_num = re.sub(r"^\s*\d+(?:\.\d+)?\s*[\.\)]?\s*", "", question_text).strip()
-    if text_wo_num:
-        candidates.add(norm(text_wo_num))
-        candidates.add(normalize_option_token(text_wo_num))
-
-    return [c for c in candidates if c]
-
-
 def score_question_column(col_name: str, question_num: str, question_text: str) -> int:
-    """
-    Puntaje para escoger la mejor columna del CSV para una pregunta.
-    """
     col_norm = norm(col_name)
     col_slug = normalize_option_token(col_name)
 
@@ -442,9 +439,6 @@ def find_question_column(df: pd.DataFrame, question_num: str, question_text: str
 # CONTEO DE OPCIONES DENTRO DE UNA CELDA
 # =========================================================
 def split_multiselect_cell(value: str):
-    """
-    Divide respuestas múltiples separadas por coma.
-    """
     if is_effectively_empty(value):
         return []
 
@@ -460,24 +454,13 @@ def split_multiselect_cell(value: str):
 def is_unproductive_option(token_norm: str) -> bool:
     if token_norm in OPCIONES_NO_PRODUCTIVAS:
         return True
-
-    # Variantes que empiecen con "otro_"
     if token_norm.startswith("otro_") or token_norm.startswith("otros_"):
         return True
-
     return False
 
 
 def count_descriptor_occurrences_in_question_column(series: pd.Series):
-    """
-    Cuenta las opciones reales seleccionadas dentro de una columna de pregunta.
-    Devuelve:
-      - contador por token normalizado
-      - tokens no ubicados
-      - filas vacías
-    """
     counter = Counter()
-    unmapped_counter = Counter()
     blank_rows = 0
 
     for val in series:
@@ -498,20 +481,16 @@ def count_descriptor_occurrences_in_question_column(series: pd.Series):
 
             counter[token] += 1
 
-    return counter, unmapped_counter, blank_rows
+    return counter, blank_rows
 
 
 # =========================================================
 # MAPEO EXCEL <-> RESPUESTAS DEL CSV
 # =========================================================
 def build_descriptor_aliases(descriptor_text: str):
-    """
-    Genera alias para mejorar la coincidencia entre Excel y CSV.
-    """
     base = normalize_option_token(descriptor_text)
     aliases = {base}
 
-    # Ajustes puntuales frecuentes
     alias_map = {
         "consumo_de_drogas": {
             "consumo_de_drogas",
@@ -578,10 +557,6 @@ def build_descriptor_aliases(descriptor_text: str):
 
 
 def match_descriptor_count(descriptor_text: str, option_counter: Counter):
-    """
-    Toma un descriptor del Excel y devuelve cuántas veces aparece
-    en las opciones reales del CSV.
-    """
     aliases = build_descriptor_aliases(descriptor_text)
 
     total = 0
@@ -643,7 +618,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 })
             continue
 
-        option_counter, _, blank_rows = count_descriptor_occurrences_in_question_column(df_csv[question_col])
+        option_counter, blank_rows = count_descriptor_occurrences_in_question_column(df_csv[question_col])
 
         matched_any_token = set()
 
@@ -674,11 +649,10 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 "descriptor": descriptor,
                 "columna_pregunta_csv": question_col,
                 "puntaje_columna": score,
-                "mapeado": "Sí" if matched_tokens or total == 0 else "Sí",
+                "mapeado": "Sí",
                 "motivo": "Conteo por opciones dentro de la celda",
             })
 
-        # Opciones del CSV que no se lograron ubicar en el Excel
         for token, cnt in option_counter.items():
             if token not in matched_any_token and not is_unproductive_option(token):
                 unmapped_options_rows.append({
@@ -691,7 +665,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                     "cantidad": int(cnt),
                 })
 
-        # Registro informativo de filas vacías por pregunta
         unmapped_options_rows.append({
             "archivo": filename,
             "tipo": file_type,
@@ -743,11 +716,18 @@ def build_global_totals(df_results_all: pd.DataFrame) -> pd.DataFrame:
 
     totals["sort_key"] = totals["pregunta_num"].apply(question_sort_key)
     totals = totals.sort_values(
-        by=["tipo", "sort_key", "descriptor"],
+        by=["tipo", "sort_key", "cantidad_respuestas", "descriptor"],
+        ascending=[True, True, False, True],
         kind="stable"
     ).drop(columns=["sort_key"])
 
     return totals
+
+
+def remove_zero_rows(df: pd.DataFrame, count_col: str):
+    if df.empty or count_col not in df.columns:
+        return df.copy()
+    return df[df[count_col] > 0].copy()
 
 
 # =========================================================
@@ -759,6 +739,43 @@ def to_excel_bytes(dfs: dict) -> bytes:
         for sheet_name, df in dfs.items():
             df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
     return output.getvalue()
+
+
+# =========================================================
+# RENDER GRANDE PARA "TOTALES POR DESCRIPTOR"
+# =========================================================
+def render_descriptor_cards(df: pd.DataFrame):
+    if df.empty:
+        st.info("No hay resultados con conteos mayores a 0 para los filtros seleccionados.")
+        return
+
+    grouped = (
+        df.sort_values(
+            by=["tipo", "pregunta_num", "cantidad_respuestas", "descriptor"],
+            ascending=[True, True, False, True]
+        )
+        .groupby(["tipo", "pregunta_num", "pregunta"], sort=False)
+    )
+
+    for (tipo, pregunta_num, pregunta), subdf in grouped:
+        html_rows = ""
+        for _, row in subdf.iterrows():
+            html_rows += f"""
+            <div class="big-descriptor-row">
+                <div class="big-descriptor-name">{row['descriptor']}</div>
+                <div class="big-descriptor-count">{int(row['cantidad_respuestas'])}</div>
+            </div>
+            """
+
+        html = f"""
+        <div class="big-card">
+            <div class="big-question">Pregunta {pregunta_num}</div>
+            <div class="big-meta"><strong>Tipo:</strong> {tipo}</div>
+            <div class="big-meta">{pregunta}</div>
+            {html_rows}
+        </div>
+        """
+        st.markdown(html, unsafe_allow_html=True)
 
 
 # =========================================================
@@ -849,8 +866,19 @@ if not all_results:
 df_results_all = pd.concat(all_results, ignore_index=True)
 df_mapping_all = pd.concat(all_mapping, ignore_index=True)
 df_unmapped_all = pd.concat(all_unmapped, ignore_index=True) if all_unmapped else pd.DataFrame()
+
 df_summary = summarize_results(df_results_all)
 df_totals = build_global_totals(df_results_all)
+
+# =========================================================
+# QUITAR CEROS
+# =========================================================
+df_results_all = remove_zero_rows(df_results_all, "cantidad_respuestas")
+df_summary = remove_zero_rows(df_summary, "cantidad_respuestas")
+df_totals = remove_zero_rows(df_totals, "cantidad_respuestas")
+
+if not df_unmapped_all.empty:
+    df_unmapped_all = remove_zero_rows(df_unmapped_all, "cantidad")
 
 # =========================================================
 # FILTROS
@@ -859,9 +887,9 @@ st.markdown("## Filtros")
 
 colf1, colf2, colf3 = st.columns(3)
 
-tipos = sorted(df_results_all["tipo"].dropna().unique().tolist())
-preguntas = sorted(df_results_all["pregunta_num"].dropna().unique().tolist(), key=question_sort_key)
-archivos = sorted(df_results_all["archivo"].dropna().unique().tolist())
+tipos = sorted(df_results_all["tipo"].dropna().unique().tolist()) if not df_results_all.empty else []
+preguntas = sorted(df_results_all["pregunta_num"].dropna().unique().tolist(), key=question_sort_key) if not df_results_all.empty else []
+archivos = sorted(df_results_all["archivo"].dropna().unique().tolist()) if not df_results_all.empty else []
 
 with colf1:
     filtro_tipo = st.multiselect("Tipo", options=tipos, default=tipos)
@@ -911,10 +939,10 @@ st.markdown("## Resumen general")
 
 m1, m2, m3, m4 = st.columns(4)
 
-m1.metric("Archivos procesados", len(df_results_all["archivo"].unique()))
-m2.metric("Preguntas detectadas", len(df_results_all["pregunta_num"].unique()))
-m3.metric("Descriptores evaluados", len(df_results_all))
-m4.metric("Respuestas contabilizadas", int(df_results_all["cantidad_respuestas"].sum()))
+m1.metric("Archivos procesados", len(df_results_all["archivo"].unique()) if not df_results_all.empty else 0)
+m2.metric("Preguntas detectadas", len(df_results_all["pregunta_num"].unique()) if not df_results_all.empty else 0)
+m3.metric("Descriptores con conteo", len(df_results_all) if not df_results_all.empty else 0)
+m4.metric("Respuestas contabilizadas", int(df_results_all["cantidad_respuestas"].sum()) if not df_results_all.empty else 0)
 
 # =========================================================
 # TABS
@@ -929,19 +957,28 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 with tab1:
     st.subheader("Totales por descriptor")
-    st.dataframe(df_totals_f, use_container_width=True)
+    render_descriptor_cards(df_totals_f)
 
 with tab2:
     st.subheader("Resumen por pregunta")
-    st.dataframe(df_summary_f, use_container_width=True)
+    if df_summary_f.empty:
+        st.info("No hay datos para mostrar.")
+    else:
+        st.dataframe(df_summary_f, use_container_width=True)
 
 with tab3:
     st.subheader("Detalle por archivo")
-    st.dataframe(df_results_f, use_container_width=True)
+    if df_results_f.empty:
+        st.info("No hay datos para mostrar.")
+    else:
+        st.dataframe(df_results_f, use_container_width=True)
 
 with tab4:
     st.subheader("Mapeo pregunta ↔ CSV")
-    st.dataframe(df_mapping_f, use_container_width=True)
+    if df_mapping_f.empty:
+        st.info("No hay datos para mostrar.")
+    else:
+        st.dataframe(df_mapping_f, use_container_width=True)
 
 with tab5:
     st.subheader("Opciones del CSV no ubicadas en el Excel")
