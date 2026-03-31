@@ -6,7 +6,7 @@ import re
 import csv
 import unicodedata
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 import pandas as pd
 import streamlit as st
@@ -28,6 +28,26 @@ SHEET_BY_FILETYPE = {
     "policial": "Policia",
 }
 
+TOKENS_IGNORAR = {
+    "",
+    "nan",
+    "none",
+    "null",
+}
+
+OPCIONES_NO_PRODUCTIVAS = {
+    "otro",
+    "otros",
+    "otra",
+    "otras",
+    "otro problema",
+    "otro problema que considere importante",
+    "otros delitos",
+    "otros delitos cuales",
+    "cual",
+    "cuales",
+    "especifique",
+}
 
 # =========================================================
 # UTILIDADES DE TEXTO
@@ -58,23 +78,22 @@ def slugify(text) -> str:
     return s
 
 
+def normalize_option_token(text) -> str:
+    """
+    Normaliza opciones del CSV y del Excel para compararlas.
+    """
+    s = slugify(text)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s
+
+
 def extract_question_number(text: str) -> str:
-    """
-    Extrae numeración tipo:
-    12.
-    20.
-    31.4
-    """
     s = str(text).strip()
     m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*[\.\)]?", s)
     return m.group(1) if m else ""
 
 
 def question_sort_key(q):
-    """
-    Orden natural para preguntas tipo 12, 12.1, 31.4.
-    Devuelve una tupla para que pandas pueda ordenar sin error.
-    """
     s = str(q).strip()
     parts = s.split(".")
     out = []
@@ -89,12 +108,8 @@ def question_sort_key(q):
 def is_effectively_empty(value) -> bool:
     if value is None:
         return True
-    s = str(value).strip()
-    if s == "":
-        return True
-    if norm(s) in {"nan", "none", "null"}:
-        return True
-    return False
+    s = norm(value)
+    return s in TOKENS_IGNORAR
 
 
 # =========================================================
@@ -118,18 +133,17 @@ def infer_file_type(filename: str) -> str:
 # =========================================================
 def load_guide_excel(path_excel: str):
     """
-    Lee el Excel guía y devuelve una estructura:
+    Devuelve:
     {
-      "Comunidad ": [
-         {
-            "pregunta_num": "12",
-            "pregunta_texto": "...",
-            "descriptor_texto": "...",
-            "descriptor_slug": "..."
-         },
-         ...
-      ],
-      ...
+      hoja: [
+        {
+          pregunta_num,
+          pregunta_texto,
+          pregunta_slug,
+          descriptor_texto,
+          descriptor_slug
+        }
+      ]
     }
     """
     xls = pd.ExcelFile(path_excel)
@@ -145,7 +159,7 @@ def load_guide_excel(path_excel: str):
 
         for _, row in df.iterrows():
             vals = [str(v).strip() for v in row.tolist()]
-            vals_nonempty = [v for v in vals if v and norm(v) not in {"nan", "none"}]
+            vals_nonempty = [v for v in vals if v and norm(v) not in TOKENS_IGNORAR]
 
             if not vals_nonempty:
                 continue
@@ -164,8 +178,9 @@ def load_guide_excel(path_excel: str):
                         rows.append({
                             "pregunta_num": current_question_num,
                             "pregunta_texto": current_question_text,
+                            "pregunta_slug": normalize_option_token(current_question_text),
                             "descriptor_texto": desc_clean,
-                            "descriptor_slug": slugify(desc_clean),
+                            "descriptor_slug": normalize_option_token(desc_clean),
                         })
                 continue
 
@@ -173,8 +188,9 @@ def load_guide_excel(path_excel: str):
                 rows.append({
                     "pregunta_num": current_question_num,
                     "pregunta_texto": current_question_text,
+                    "pregunta_slug": normalize_option_token(current_question_text),
                     "descriptor_texto": first,
-                    "descriptor_slug": slugify(first),
+                    "descriptor_slug": normalize_option_token(first),
                 })
 
                 for extra in vals_nonempty[1:]:
@@ -183,8 +199,9 @@ def load_guide_excel(path_excel: str):
                         rows.append({
                             "pregunta_num": current_question_num,
                             "pregunta_texto": current_question_text,
+                            "pregunta_slug": normalize_option_token(current_question_text),
                             "descriptor_texto": extra_clean,
-                            "descriptor_slug": slugify(extra_clean),
+                            "descriptor_slug": normalize_option_token(extra_clean),
                         })
 
         dedup = []
@@ -203,6 +220,28 @@ def load_guide_excel(path_excel: str):
         guide[sheet] = dedup
 
     return guide
+
+
+def build_guide_summary(guide: dict) -> pd.DataFrame:
+    rows = []
+
+    for sh, items in guide.items():
+        if not items:
+            rows.append({
+                "hoja": sh.strip(),
+                "preguntas_detectadas": 0,
+                "descriptores_detectados": 0,
+            })
+            continue
+
+        df_tmp = pd.DataFrame(items)
+        rows.append({
+            "hoja": sh.strip(),
+            "preguntas_detectadas": df_tmp["pregunta_num"].nunique(),
+            "descriptores_detectados": len(df_tmp),
+        })
+
+    return pd.DataFrame(rows)
 
 
 # =========================================================
@@ -246,10 +285,6 @@ def parse_csv_with_python_engine(content: bytes, encoding: str, delimiter: str):
 
 
 def try_read_csv_bytes(content: bytes) -> pd.DataFrame:
-    """
-    Lectura robusta para CSV de Survey123.
-    Intenta con varios separadores y encodings.
-    """
     attempts = [
         ("utf-8-sig", ","),
         ("utf-8", ","),
@@ -310,52 +345,256 @@ def flatten_headers(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =========================================================
-# MAPEO DESCRIPTOR -> COLUMNAS CSV
+# UBICACIÓN DE PREGUNTAS EN EL CSV
 # =========================================================
-def find_matching_columns(df: pd.DataFrame, descriptor_slug: str):
-    matches = []
+def build_question_groups(guide_sheet_rows: list):
+    grouped = defaultdict(list)
+    for r in guide_sheet_rows:
+        grouped[(r["pregunta_num"], r["pregunta_texto"])].append(r)
+    return grouped
+
+
+def question_header_candidates(question_num: str, question_text: str):
+    """
+    Genera candidatos para encontrar la columna de la pregunta en el CSV.
+    """
+    qnorm = norm(question_text)
+    qslug = normalize_option_token(question_text)
+
+    candidates = set()
+
+    if question_num:
+        candidates.add(question_num)
+        candidates.add(f"{question_num}.")
+        candidates.add(f"{question_num})")
+
+    candidates.add(qnorm)
+    candidates.add(qslug)
+
+    # Agrega versión del texto sin el número
+    text_wo_num = re.sub(r"^\s*\d+(?:\.\d+)?\s*[\.\)]?\s*", "", question_text).strip()
+    if text_wo_num:
+        candidates.add(norm(text_wo_num))
+        candidates.add(normalize_option_token(text_wo_num))
+
+    return [c for c in candidates if c]
+
+
+def score_question_column(col_name: str, question_num: str, question_text: str) -> int:
+    """
+    Puntaje para escoger la mejor columna del CSV para una pregunta.
+    """
+    col_norm = norm(col_name)
+    col_slug = normalize_option_token(col_name)
+
+    score = 0
+    qnum = str(question_num).strip()
+    qtext_norm = norm(question_text)
+    qtext_slug = normalize_option_token(question_text)
+
+    text_wo_num = re.sub(r"^\s*\d+(?:\.\d+)?\s*[\.\)]?\s*", "", question_text).strip()
+    text_wo_num_norm = norm(text_wo_num)
+    text_wo_num_slug = normalize_option_token(text_wo_num)
+
+    if qnum:
+        if col_norm.startswith(qnum):
+            score += 100
+        if f"{qnum}." in col_norm or f"{qnum})" in col_norm:
+            score += 80
+        if re.search(rf"(^|\s){re.escape(qnum)}(\.|\)|\s|$)", col_norm):
+            score += 60
+
+    if qtext_norm and qtext_norm == col_norm:
+        score += 120
+    if qtext_slug and qtext_slug == col_slug:
+        score += 120
+
+    if text_wo_num_norm and text_wo_num_norm in col_norm:
+        score += 90
+    if text_wo_num_slug and text_wo_num_slug in col_slug:
+        score += 90
+
+    if qtext_norm and qtext_norm in col_norm:
+        score += 50
+    if qtext_slug and qtext_slug in col_slug:
+        score += 50
+
+    return score
+
+
+def find_question_column(df: pd.DataFrame, question_num: str, question_text: str):
+    best_col = None
+    best_score = -1
 
     for col in df.columns:
-        cslug = slugify(col)
+        score = score_question_column(col, question_num, question_text)
+        if score > best_score:
+            best_score = score
+            best_col = col
 
-        if cslug == descriptor_slug:
-            matches.append(col)
-            continue
+    if best_score < 50:
+        return None, best_score
 
-        if descriptor_slug and descriptor_slug in cslug:
-            matches.append(col)
-            continue
-
-        if cslug and cslug in descriptor_slug:
-            matches.append(col)
-            continue
-
-    return matches
-
-
-def count_answers_in_columns(df: pd.DataFrame, cols: list) -> int:
-    """
-    Si una fila tiene valor en cualquiera de las columnas mapeadas, cuenta 1.
-    """
-    if not cols:
-        return 0
-
-    subset = df[cols].copy()
-
-    def row_has_answer(row):
-        for val in row:
-            if not is_effectively_empty(val):
-                sval = norm(val)
-                if sval not in {"0", "false", "no", "n"}:
-                    return True
-        return False
-
-    return int(subset.apply(row_has_answer, axis=1).sum())
+    return best_col, best_score
 
 
 # =========================================================
-# PROCESAMIENTO PRINCIPAL
+# CONTEO DE OPCIONES DENTRO DE UNA CELDA
 # =========================================================
+def split_multiselect_cell(value: str):
+    """
+    Divide respuestas múltiples separadas por coma.
+    """
+    if is_effectively_empty(value):
+        return []
+
+    raw = str(value).strip()
+    if not raw:
+        return []
+
+    parts = [p.strip() for p in raw.split(",")]
+    parts = [p for p in parts if p and norm(p) not in TOKENS_IGNORAR]
+    return parts
+
+
+def is_unproductive_option(token_norm: str) -> bool:
+    if token_norm in OPCIONES_NO_PRODUCTIVAS:
+        return True
+
+    # Variantes que empiecen con "otro_"
+    if token_norm.startswith("otro_") or token_norm.startswith("otros_"):
+        return True
+
+    return False
+
+
+def count_descriptor_occurrences_in_question_column(series: pd.Series):
+    """
+    Cuenta las opciones reales seleccionadas dentro de una columna de pregunta.
+    Devuelve:
+      - contador por token normalizado
+      - tokens no ubicados
+      - filas vacías
+    """
+    counter = Counter()
+    unmapped_counter = Counter()
+    blank_rows = 0
+
+    for val in series:
+        options = split_multiselect_cell(val)
+
+        if not options:
+            blank_rows += 1
+            continue
+
+        for opt in options:
+            token = normalize_option_token(opt)
+
+            if not token or token in TOKENS_IGNORAR:
+                continue
+
+            if is_unproductive_option(token):
+                continue
+
+            counter[token] += 1
+
+    return counter, unmapped_counter, blank_rows
+
+
+# =========================================================
+# MAPEO EXCEL <-> RESPUESTAS DEL CSV
+# =========================================================
+def build_descriptor_aliases(descriptor_text: str):
+    """
+    Genera alias para mejorar la coincidencia entre Excel y CSV.
+    """
+    base = normalize_option_token(descriptor_text)
+    aliases = {base}
+
+    # Ajustes puntuales frecuentes
+    alias_map = {
+        "consumo_de_drogas": {
+            "consumo_de_drogas",
+            "consumo_de_drogas_en_espacios_publicos",
+        },
+        "consumo_de_drogas_en_espacios_publicos": {
+            "consumo_de_drogas_en_espacios_publicos",
+        },
+        "contaminacion_sonica": {
+            "escandalos_musicales_o_ruidos_excesivos",
+            "contaminacion_sonica",
+        },
+        "carencia_o_inexistencia_de_alumbrado_publico": {
+            "carencia_o_inexistencia_de_alumbrado_publico",
+            "deficiencias_en_el_alumbrado_publico",
+        },
+        "deficiencias_en_el_alumbrado_publico": {
+            "deficiencias_en_el_alumbrado_publico",
+            "carencia_o_inexistencia_de_alumbrado_publico",
+        },
+        "presencia_de_personas_en_situacion_de_calle": {
+            "presencia_de_personas_en_situacion_de_calle_personas_que_viven_permanentemente_en_la_via_publica",
+            "presencia_de_personas_en_situacion_de_calle",
+        },
+        "ventas_informales_ambulantes": {
+            "ventas_informales_ambulantes",
+        },
+        "problemas_vecinales_o_conflictos_entre_vecinos": {
+            "problemas_vecinales_o_conflictos_entre_vecinos",
+        },
+        "desvinculacion_escolar_desercion_escolar": {
+            "desvinculacion_escolar_desercion_escolar",
+        },
+        "perdida_de_espacios_publicos_parques_polideportivos_u_otros": {
+            "perdida_de_espacios_publicos_parques_polideportivos_u_otros",
+        },
+        "acumulacion_de_basura_aguas_negras_o_mal_alcantarillado": {
+            "acumulacion_de_basura_aguas_negras_o_mal_alcantarillado",
+        },
+        "falta_de_oportunidades_laborales": {
+            "falta_de_oportunidades_laborales",
+        },
+        "asentamientos_informales_o_precarios": {
+            "asentamientos_informales_o_precarios",
+        },
+        "lotes_baldios": {
+            "lotes_baldios",
+        },
+        "cuarterias": {
+            "cuarterias",
+        },
+        "consumo_de_alcohol_en_via_publica": {
+            "consumo_de_alcohol_en_via_publica",
+        },
+        "no_se_observan_estas_problematicas_en_el_distrito": {
+            "no_se_observan_estas_problematicas_en_el_distrito",
+        },
+    }
+
+    if base in alias_map:
+        aliases.update(alias_map[base])
+
+    return aliases
+
+
+def match_descriptor_count(descriptor_text: str, option_counter: Counter):
+    """
+    Toma un descriptor del Excel y devuelve cuántas veces aparece
+    en las opciones reales del CSV.
+    """
+    aliases = build_descriptor_aliases(descriptor_text)
+
+    total = 0
+    matched_tokens = []
+
+    for token, cnt in option_counter.items():
+        if token in aliases:
+            total += cnt
+            matched_tokens.append(token)
+
+    return total, sorted(set(matched_tokens))
+
+
 def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
     file_type = infer_file_type(filename)
     if not file_type:
@@ -370,18 +609,50 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
 
     results = []
     mapping_info = []
+    unmapped_options_rows = []
 
-    grouped = defaultdict(list)
-    for r in base:
-        grouped[(r["pregunta_num"], r["pregunta_texto"])].append(r)
+    grouped = build_question_groups(base)
 
     for (preg_num, preg_text), items in grouped.items():
+        question_col, score = find_question_column(df_csv, preg_num, preg_text)
+
+        if not question_col:
+            for item in items:
+                results.append({
+                    "archivo": filename,
+                    "tipo": file_type,
+                    "hoja_excel": sheet_name.strip(),
+                    "pregunta_num": preg_num,
+                    "pregunta": preg_text,
+                    "descriptor": item["descriptor_texto"],
+                    "columna_pregunta_csv": "",
+                    "opciones_csv_que_contaron": "",
+                    "cantidad_respuestas": 0,
+                })
+
+                mapping_info.append({
+                    "archivo": filename,
+                    "tipo": file_type,
+                    "pregunta_num": preg_num,
+                    "pregunta": preg_text,
+                    "descriptor": item["descriptor_texto"],
+                    "columna_pregunta_csv": "",
+                    "puntaje_columna": score,
+                    "mapeado": "No",
+                    "motivo": "No se encontró columna de la pregunta en el CSV",
+                })
+            continue
+
+        option_counter, _, blank_rows = count_descriptor_occurrences_in_question_column(df_csv[question_col])
+
+        matched_any_token = set()
+
         for item in items:
             descriptor = item["descriptor_texto"]
-            descriptor_slug = item["descriptor_slug"]
+            total, matched_tokens = match_descriptor_count(descriptor, option_counter)
 
-            matches = find_matching_columns(df_csv, descriptor_slug)
-            count = count_answers_in_columns(df_csv, matches)
+            for mt in matched_tokens:
+                matched_any_token.add(mt)
 
             results.append({
                 "archivo": filename,
@@ -390,8 +661,9 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 "pregunta_num": preg_num,
                 "pregunta": preg_text,
                 "descriptor": descriptor,
-                "columnas_encontradas": " | ".join(matches) if matches else "",
-                "cantidad_respuestas": count,
+                "columna_pregunta_csv": question_col,
+                "opciones_csv_que_contaron": " | ".join(matched_tokens),
+                "cantidad_respuestas": int(total),
             })
 
             mapping_info.append({
@@ -400,17 +672,46 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 "pregunta_num": preg_num,
                 "pregunta": preg_text,
                 "descriptor": descriptor,
-                "descriptor_slug": descriptor_slug,
-                "columnas_encontradas": " | ".join(matches) if matches else "",
-                "mapeado": "Sí" if matches else "No",
+                "columna_pregunta_csv": question_col,
+                "puntaje_columna": score,
+                "mapeado": "Sí" if matched_tokens or total == 0 else "Sí",
+                "motivo": "Conteo por opciones dentro de la celda",
             })
+
+        # Opciones del CSV que no se lograron ubicar en el Excel
+        for token, cnt in option_counter.items():
+            if token not in matched_any_token and not is_unproductive_option(token):
+                unmapped_options_rows.append({
+                    "archivo": filename,
+                    "tipo": file_type,
+                    "pregunta_num": preg_num,
+                    "pregunta": preg_text,
+                    "columna_pregunta_csv": question_col,
+                    "opcion_csv_no_ubicada": token,
+                    "cantidad": int(cnt),
+                })
+
+        # Registro informativo de filas vacías por pregunta
+        unmapped_options_rows.append({
+            "archivo": filename,
+            "tipo": file_type,
+            "pregunta_num": preg_num,
+            "pregunta": preg_text,
+            "columna_pregunta_csv": question_col,
+            "opcion_csv_no_ubicada": "[filas_vacias_ignoradas]",
+            "cantidad": int(blank_rows),
+        })
 
     df_results = pd.DataFrame(results)
     df_mapping = pd.DataFrame(mapping_info)
+    df_unmapped = pd.DataFrame(unmapped_options_rows)
 
-    return df_results, df_mapping
+    return df_results, df_mapping, df_unmapped
 
 
+# =========================================================
+# RESÚMENES
+# =========================================================
 def summarize_results(df_results: pd.DataFrame):
     if df_results.empty:
         return pd.DataFrame()
@@ -428,31 +729,6 @@ def summarize_results(df_results: pd.DataFrame):
     ).drop(columns=["sort_key"])
 
     return summary
-
-
-def build_guide_summary(guide: dict) -> pd.DataFrame:
-    rows = []
-
-    for sh, items in guide.items():
-        if not items:
-            rows.append({
-                "hoja": sh.strip(),
-                "preguntas_detectadas": 0,
-                "descriptores_detectados": 0,
-            })
-            continue
-
-        df_tmp = pd.DataFrame(items)
-        preguntas = df_tmp["pregunta_num"].nunique()
-        descriptores = len(df_tmp)
-
-        rows.append({
-            "hoja": sh.strip(),
-            "preguntas_detectadas": preguntas,
-            "descriptores_detectados": descriptores,
-        })
-
-    return pd.DataFrame(rows)
 
 
 def build_global_totals(df_results_all: pd.DataFrame) -> pd.DataFrame:
@@ -489,7 +765,7 @@ def to_excel_bytes(dfs: dict) -> bytes:
 # INTERFAZ
 # =========================================================
 st.title("Conteo de respuestas por pregunta / descriptor")
-st.caption("Carga el Excel guía desde el repositorio y luego sube los CSV de Comunidad, Comercio y Policial.")
+st.caption("Usa el Excel como guía, ubica la columna de cada pregunta en el CSV y cuenta las opciones reales dentro de cada celda.")
 
 with st.sidebar:
     st.header("Configuración")
@@ -541,6 +817,7 @@ if not uploaded_files:
 
 all_results = []
 all_mapping = []
+all_unmapped = []
 read_errors = []
 
 for file in uploaded_files:
@@ -549,10 +826,11 @@ for file in uploaded_files:
         df_csv = try_read_csv_bytes(content)
         df_csv = flatten_headers(df_csv)
 
-        df_results, df_mapping = build_results_for_file(df_csv, file.name, guide)
+        df_results, df_mapping, df_unmapped = build_results_for_file(df_csv, file.name, guide)
 
         all_results.append(df_results)
         all_mapping.append(df_mapping)
+        all_unmapped.append(df_unmapped)
 
     except Exception as e:
         read_errors.append({
@@ -570,6 +848,7 @@ if not all_results:
 
 df_results_all = pd.concat(all_results, ignore_index=True)
 df_mapping_all = pd.concat(all_mapping, ignore_index=True)
+df_unmapped_all = pd.concat(all_unmapped, ignore_index=True) if all_unmapped else pd.DataFrame()
 df_summary = summarize_results(df_results_all)
 df_totals = build_global_totals(df_results_all)
 
@@ -611,6 +890,15 @@ df_mapping_f = df_mapping_all[
     df_mapping_all["archivo"].isin(filtro_archivo)
 ].copy()
 
+if not df_unmapped_all.empty:
+    df_unmapped_f = df_unmapped_all[
+        df_unmapped_all["tipo"].isin(filtro_tipo) &
+        df_unmapped_all["pregunta_num"].isin(filtro_pregunta) &
+        df_unmapped_all["archivo"].isin(filtro_archivo)
+    ].copy()
+else:
+    df_unmapped_f = pd.DataFrame()
+
 df_totals_f = df_totals[
     df_totals["tipo"].isin(filtro_tipo) &
     df_totals["pregunta_num"].isin(filtro_pregunta)
@@ -626,43 +914,56 @@ m1, m2, m3, m4 = st.columns(4)
 m1.metric("Archivos procesados", len(df_results_all["archivo"].unique()))
 m2.metric("Preguntas detectadas", len(df_results_all["pregunta_num"].unique()))
 m3.metric("Descriptores evaluados", len(df_results_all))
-m4.metric("Descriptores mapeados", int((df_mapping_all["mapeado"] == "Sí").sum()))
+m4.metric("Respuestas contabilizadas", int(df_results_all["cantidad_respuestas"].sum()))
 
 # =========================================================
 # TABS
 # =========================================================
-tab1, tab2, tab3, tab4 = st.tabs([
-    "Resumen por pregunta",
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Totales por descriptor",
-    "Detalle por archivo",
-    "Mapeo Excel ↔ CSV"
+    "Resumen por pregunta",
+    "Detalle",
+    "Mapeo pregunta ↔ CSV",
+    "Opciones no ubicadas"
 ])
 
 with tab1:
+    st.subheader("Totales por descriptor")
+    st.dataframe(df_totals_f, use_container_width=True)
+
+with tab2:
     st.subheader("Resumen por pregunta")
     st.dataframe(df_summary_f, use_container_width=True)
 
-with tab2:
-    st.subheader("Total global por descriptor")
-    st.dataframe(df_totals_f, use_container_width=True)
-
 with tab3:
-    st.subheader("Detalle por archivo / descriptor")
+    st.subheader("Detalle por archivo")
     st.dataframe(df_results_f, use_container_width=True)
 
 with tab4:
-    st.subheader("Mapeo Excel ↔ CSV")
+    st.subheader("Mapeo pregunta ↔ CSV")
     st.dataframe(df_mapping_f, use_container_width=True)
+
+with tab5:
+    st.subheader("Opciones del CSV no ubicadas en el Excel")
+    if df_unmapped_f.empty:
+        st.info("No hay opciones no ubicadas.")
+    else:
+        st.dataframe(df_unmapped_f, use_container_width=True)
 
 # =========================================================
 # DESCARGA
 # =========================================================
-excel_bytes = to_excel_bytes({
-    "resumen_pregunta": df_summary_f,
+dfs_export = {
     "totales_descriptor": df_totals_f,
-    "detalle_archivo": df_results_f,
-    "mapeo_excel_csv": df_mapping_f,
-})
+    "resumen_pregunta": df_summary_f,
+    "detalle": df_results_f,
+    "mapeo": df_mapping_f,
+}
+
+if not df_unmapped_f.empty:
+    dfs_export["no_ubicadas"] = df_unmapped_f
+
+excel_bytes = to_excel_bytes(dfs_export)
 
 st.download_button(
     label="Descargar resultados en Excel",
