@@ -44,18 +44,46 @@ OPCIONES_NO_PRODUCTIVAS = {
     "especifique",
 }
 
-# Preguntas que se mantienen desglosadas / exactas
+PATRONES_NO_OBSERVA = [
+    "no_se_observa",
+    "no_se_observan",
+    "no_se_presenta",
+    "no_se_presentan",
+    "no_hay",
+    "ninguno",
+    "ninguna",
+]
+
+# Preguntas que se mantienen desglosadas
 PREGUNTAS_EXACTAS = {
     "comunidad": {"12", "18", "20", "22", "24", "26", "27"},
     "comercio": {"12", "18", "20"},
-    "policia": None,   # todo igual
-    "policial": None,  # todo igual
+    "policia": None,
+    "policial": None,
 }
 
-# Preguntas especiales de estafas
+# Preguntas con regla especial de estafas
 PREGUNTAS_ESTAFA_ESPECIAL = {
     ("comunidad", "23"),
     ("comercio", "21"),
+}
+
+# Etiquetas unificadas por pregunta
+UNIFIED_LABELS = {
+    ("comunidad", "13"): "Oferta de servicios y oportunidades",
+    ("comunidad", "15"): "Infraestructura vial",
+    ("comunidad", "16"): "Espacios de riesgo",
+    ("comunidad", "19"): "Venta de drogas",
+    ("comunidad", "21"): "Delitos sexuales",
+    ("comunidad", "23"): "Estafa",
+    ("comunidad", "25"): "Abandono de personas",
+    ("comunidad", "28"): "Trata de personas",
+
+    ("comercio", "13"): "Oferta de servicios y oportunidades",
+    ("comercio", "15"): "Infraestructura vial",
+    ("comercio", "16"): "Espacios de riesgo",
+    ("comercio", "19"): "Venta de drogas",
+    ("comercio", "21"): "Estafa",
 }
 
 # =========================================================
@@ -115,20 +143,16 @@ def is_effectively_empty(value) -> bool:
     return norm(value) in TOKENS_IGNORAR
 
 
-def pretty_sheet_name(file_type: str) -> str:
-    return SHEET_BY_FILETYPE.get(file_type, "").strip()
+def clean_descriptor_display(text: str) -> str:
+    s = str(text).strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
 
 
 def normalize_token_for_compare(token: str) -> str:
     t = normalize_option_token(token)
     t = t.strip("._- ")
     return t
-
-
-def clean_descriptor_display(text: str) -> str:
-    s = str(text).strip()
-    s = re.sub(r"\s+", " ", s)
-    return s
 
 
 # =========================================================
@@ -415,19 +439,24 @@ def split_multiselect_cell(value: str):
     return parts
 
 
+def is_no_observa_option(token_norm: str) -> bool:
+    for p in PATRONES_NO_OBSERVA:
+        if p in token_norm:
+            return True
+    return False
+
+
 def is_unproductive_option(token_norm: str) -> bool:
     if token_norm in OPCIONES_NO_PRODUCTIVAS:
         return True
     if token_norm.startswith("otro_") or token_norm.startswith("otros_"):
         return True
+    if is_no_observa_option(token_norm):
+        return True
     return False
 
 
 def tokenize_cell_unique(value: str):
-    """
-    Devuelve tokens únicos por fila/celda, ya normalizados.
-    Esto evita duplicados tipo 'hurto' y 'hurto.' dentro del conteo por fila.
-    """
     options = split_multiselect_cell(value)
     tokens = []
 
@@ -456,17 +485,12 @@ def is_estafa_special(file_type: str, question_num: str) -> bool:
     return (file_type, question_num) in PREGUNTAS_ESTAFA_ESPECIAL
 
 
-def normalize_group_label(file_type: str, question_num: str, descriptor_text: str) -> str:
-    base = normalize_option_token(descriptor_text)
+def get_unified_label(file_type: str, question_num: str, question_text: str) -> str:
+    if (file_type, question_num) in UNIFIED_LABELS:
+        return UNIFIED_LABELS[(file_type, question_num)]
 
-    # Reglas especiales de estafa
-    if is_estafa_special(file_type, question_num):
-        if "estafa" in base and "informatica" in base:
-            return "Estafa informática"
-        if "estafa" in base:
-            return "Estafa"
-
-    return clean_descriptor_display(descriptor_text)
+    text_wo_num = re.sub(r"^\s*\d+(?:\.\d+)?\s*[\.\)]?\s*", "", question_text).strip()
+    return clean_descriptor_display(text_wo_num) if text_wo_num else f"Pregunta {question_num}"
 
 
 def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text: str):
@@ -507,13 +531,13 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
         "lotes_baldios": {"lotes_baldios"},
         "cuarterias": {"cuarterias"},
         "consumo_de_alcohol_en_via_publica": {"consumo_de_alcohol_en_via_publica"},
-        "no_se_observan_estas_problematicas_en_el_distrito": {"no_se_observan_estas_problematicas_en_el_distrito"},
+        "hurto": {"hurto"},
+        "hurto_simple": {"hurto_simple", "hurto"},
     }
 
     if base in alias_map:
         aliases.update(alias_map[base])
 
-    # Estafas especiales
     if is_estafa_special(file_type, question_num):
         if "estafa" in base and "informatica" in base:
             aliases = {
@@ -534,18 +558,36 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "estafa_comercial",
             }
 
-    # Limpieza final
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
+    aliases = {a for a in aliases if not is_unproductive_option(a)}
     return aliases
 
 
-def build_group_definitions(file_type: str, question_num: str, items: list):
+def build_group_definitions(file_type: str, question_num: str, question_text: str, items: list):
     """
-    Agrupa descriptores del Excel en la forma final que se quiere mostrar.
+    Para preguntas exactas:
+      devuelve grupos por descriptor.
+    Para preguntas unificadas:
+      devuelve un solo grupo con el nombre de la pregunta.
     """
+    if not is_exact_question(file_type, question_num):
+        unified_label = get_unified_label(file_type, question_num, question_text)
+        aliases = set()
+
+        for item in items:
+            aliases.update(build_descriptor_aliases(file_type, question_num, item["descriptor_texto"]))
+
+        return {
+            unified_label: {
+                "group_label": unified_label,
+                "aliases": aliases,
+                "source_descriptors": {item["descriptor_texto"] for item in items},
+            }
+        }
+
     groups = {}
     for item in items:
-        label = normalize_group_label(file_type, question_num, item["descriptor_texto"])
+        label = clean_descriptor_display(item["descriptor_texto"])
         if label not in groups:
             groups[label] = {
                 "group_label": label,
@@ -560,10 +602,6 @@ def build_group_definitions(file_type: str, question_num: str, items: list):
 
 
 def count_group_exact(series: pd.Series, aliases: set):
-    """
-    Cuenta por ocurrencia real de token único por fila.
-    Si una fila trae el mismo token repetido por variante/punto, cuenta 1.
-    """
     total = 0
     matched_tokens = Counter()
 
@@ -583,10 +621,6 @@ def count_group_exact(series: pd.Series, aliases: set):
 
 
 def count_group_unified(series: pd.Series, aliases: set):
-    """
-    Cuenta por casilla/fila:
-    si aparece cualquiera de los alias, suma 1.
-    """
     total = 0
     matched_tokens = Counter()
 
@@ -648,8 +682,11 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
     for (preg_num, preg_text), items in grouped_questions.items():
         question_col, score = find_question_column(df_csv, preg_num, preg_text)
 
+        group_defs = build_group_definitions(file_type, preg_num, preg_text, items)
+        exact_mode = is_exact_question(file_type, preg_num)
+        mode_label = "exacto" if exact_mode else "unificado"
+
         if not question_col:
-            group_defs = build_group_definitions(file_type, preg_num, items)
             for group_label in group_defs:
                 results.append({
                     "archivo": filename,
@@ -660,7 +697,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                     "descriptor": group_label,
                     "columna_pregunta_csv": "",
                     "opciones_csv_que_contaron": "",
-                    "modo_conteo": "exacto" if is_exact_question(file_type, preg_num) else "unificado",
+                    "modo_conteo": mode_label,
                     "cantidad_respuestas": 0,
                 })
 
@@ -676,10 +713,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                     "motivo": "No se encontró columna de la pregunta en el CSV",
                 })
             continue
-
-        group_defs = build_group_definitions(file_type, preg_num, items)
-        exact_mode = is_exact_question(file_type, preg_num)
-        mode_label = "exacto" if exact_mode else "unificado"
 
         matched_aliases_union = set()
         series = df_csv[question_col]
@@ -715,7 +748,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 "columna_pregunta_csv": question_col,
                 "puntaje_columna": score,
                 "mapeado": "Sí",
-                "motivo": f"Conteo {mode_label} por casilla/token según regla de la pregunta",
+                "motivo": f"Conteo {mode_label} según regla de la pregunta",
             })
 
         unmapped_counter, blank_rows = find_unmapped_tokens(series, matched_aliases_union)
@@ -814,7 +847,7 @@ def to_excel_bytes(dfs: dict) -> bytes:
 
 
 # =========================================================
-# VISTA GRANDE
+# VISTA
 # =========================================================
 def render_totals_tables(df: pd.DataFrame):
     if df.empty:
@@ -949,6 +982,7 @@ df_totals = remove_zero_rows(df_totals, "cantidad_respuestas")
 
 if not df_unmapped_all.empty:
     df_unmapped_all = remove_zero_rows(df_unmapped_all, "cantidad")
+    df_unmapped_all = df_unmapped_all[df_unmapped_all["opcion_csv_no_ubicada"] != "[filas_vacias_ignoradas]"].copy()
 
 # filtros
 st.markdown("## Filtros")
@@ -1007,7 +1041,7 @@ m1, m2, m3, m4 = st.columns(4)
 
 m1.metric("Archivos procesados", len(df_results_all["archivo"].unique()) if not df_results_all.empty else 0)
 m2.metric("Preguntas detectadas", len(df_results_all["pregunta_num"].unique()) if not df_results_all.empty else 0)
-m3.metric("Descriptores con conteo", len(df_results_all) if not df_results_all.empty else 0)
+m3.metric("Resultados mostrados", len(df_results_all) if not df_results_all.empty else 0)
 m4.metric("Respuestas contabilizadas", int(df_results_all["cantidad_respuestas"].sum()) if not df_results_all.empty else 0)
 
 # tabs
