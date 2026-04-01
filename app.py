@@ -81,8 +81,8 @@ UNIFIED_LABELS = {
     ("comunidad", "28"): "Trata de personas",
 
     ("comercio", "13"): "Oferta de servicios y oportunidades",
-    ("comercio", "15"): "Infraestructura vial",
-    ("comercio", "16"): "Espacios de riesgo",
+    ("comercio", "14"): "Infraestructura vial",
+    ("comercio", "15"): "Espacios de riesgo",
     ("comercio", "19"): "Venta de drogas",
 }
 
