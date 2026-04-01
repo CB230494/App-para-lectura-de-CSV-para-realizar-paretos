@@ -555,6 +555,8 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "estafa_en_compras",
                 "estafa_comercial",
                 "estafa_por_medio_electronico",
+                "fraude_electronico",
+                "fraude_digital",
             })
 
     # Comercio 20: asaltos, refuerzo exacto
@@ -826,6 +828,23 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                         extra_matches.add(tok)
 
                 group_info["aliases"].update(extra_matches)
+
+        # Refuerzo dinámico para estafa unificada en comunidad 23 y comercio 21
+        if (
+            (file_type == "comunidad" and preg_num == "23")
+            or (file_type == "comercio" and preg_num == "21")
+        ):
+            csv_tokens = set()
+            for val in series:
+                csv_tokens.update(tokenize_cell_unique(val))
+
+            for group_label, group_info in group_defs.items():
+                if normalize_token_for_compare(group_label) == "estafa":
+                    extra_estafa = {
+                        tok for tok in csv_tokens
+                        if ("estafa" in tok or "fraude" in tok)
+                    }
+                    group_info["aliases"].update(extra_estafa)
 
         for group_label, group_info in group_defs.items():
             aliases = group_info["aliases"]
