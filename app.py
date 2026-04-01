@@ -62,7 +62,7 @@ PREGUNTAS_EXACTAS = {
     "policial": None,
 }
 
-# Estafas ahora van unificadas, no especiales
+# Estafas van unificadas
 PREGUNTAS_ESTAFA_ESPECIAL = set()
 
 # Etiquetas unificadas por pregunta
@@ -478,10 +478,6 @@ def is_exact_question(file_type: str, question_num: str) -> bool:
     return question_num in exacts
 
 
-def is_estafa_special(file_type: str, question_num: str) -> bool:
-    return (file_type, question_num) in PREGUNTAS_ESTAFA_ESPECIAL
-
-
 def get_unified_label(file_type: str, question_num: str, question_text: str) -> str:
     if (file_type, question_num) in UNIFIED_LABELS:
         return UNIFIED_LABELS[(file_type, question_num)]
@@ -535,7 +531,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
     if base in alias_map:
         aliases.update(alias_map[base])
 
-    # Refuerzo para preguntas de estafa ya unificadas
+    # Estafas unificadas
     if (
         (file_type == "comunidad" and question_num == "23")
         or (file_type == "comercio" and question_num == "21")
@@ -560,18 +556,47 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "estafa_por_medio_electronico",
             })
 
+    # Comercio 20: asaltos, refuerzo exacto
+    if file_type == "comercio" and question_num == "20":
+        if "persona" in base:
+            aliases.update({
+                "asalto_a_personas",
+                "asalto_personas",
+                "asalto_a_peatones",
+                "asalto_peatones",
+            })
+        if "comercio" in base:
+            aliases.update({
+                "asalto_a_comercio",
+                "asalto_a_comercios",
+                "asalto_comercio",
+                "asalto_comercios",
+                "asalto_a_locales_comerciales",
+            })
+        if "vivienda" in base or "casa" in base:
+            aliases.update({
+                "asalto_a_vivienda",
+                "asalto_a_viviendas",
+                "asalto_vivienda",
+                "asalto_viviendas",
+                "asalto_a_casa",
+                "asalto_a_casas",
+            })
+        if "transporte" in base:
+            aliases.update({
+                "asalto_a_transporte_publico",
+                "asalto_transporte_publico",
+                "asalto_en_transporte_publico",
+                "asalto_bus",
+                "asalto_autobus",
+            })
+
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
     aliases = {a for a in aliases if not is_unproductive_option(a)}
     return aliases
 
 
 def build_group_definitions(file_type: str, question_num: str, question_text: str, items: list):
-    """
-    Para preguntas exactas:
-      devuelve grupos por descriptor
-    Para preguntas unificadas:
-      devuelve 1 solo grupo con el nombre de la pregunta
-    """
     if not is_exact_question(file_type, question_num):
         unified_label = get_unified_label(file_type, question_num, question_text)
         aliases = set()
@@ -725,14 +750,17 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
 
             for group_label, group_info in group_defs.items():
                 desc_norm = normalize_token_for_compare(group_label)
+
                 extra_matches = set()
 
                 for tok in csv_tokens:
-                    if tok == desc_norm:
+                    if "persona" in desc_norm and ("persona" in tok or "peaton" in tok):
                         extra_matches.add(tok)
-                    elif tok.startswith(desc_norm + "_"):
+                    elif "comercio" in desc_norm and "comerc" in tok:
                         extra_matches.add(tok)
-                    elif desc_norm.startswith(tok + "_"):
+                    elif ("vivienda" in desc_norm or "casa" in desc_norm) and ("vivienda" in tok or "casa" in tok):
+                        extra_matches.add(tok)
+                    elif "transporte" in desc_norm and ("transporte" in tok or "bus" in tok or "autobus" in tok):
                         extra_matches.add(tok)
 
                 group_info["aliases"].update(extra_matches)
