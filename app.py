@@ -62,9 +62,6 @@ PREGUNTAS_EXACTAS = {
     "policial": None,
 }
 
-# Estafas van unificadas
-PREGUNTAS_ESTAFA_ESPECIAL = set()
-
 # Etiquetas unificadas por pregunta
 UNIFIED_LABELS = {
     ("comunidad", "13"): "Oferta de servicios y oportunidades",
@@ -78,7 +75,7 @@ UNIFIED_LABELS = {
 
     ("comercio", "13"): "Oferta de servicios y oportunidades",
     ("comercio", "14"): "Infraestructura vial",
-    ("comercio", "15"): "Espacios de riesgo",
+    ("comercio", "15"): "Inversión social",
     ("comercio", "19"): "Venta de drogas",
     ("comercio", "21"): "Estafa",
 }
@@ -502,6 +499,10 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "escandalos_musicales_o_ruidos_excesivos",
             "contaminacion_sonica",
         },
+        "escandalos_musicales_o_ruidos_excesivos": {
+            "escandalos_musicales_o_ruidos_excesivos",
+            "contaminacion_sonica",
+        },
         "carencia_o_inexistencia_de_alumbrado_publico": {
             "carencia_o_inexistencia_de_alumbrado_publico",
             "deficiencias_en_el_alumbrado_publico",
@@ -564,6 +565,10 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "asalto_personas",
                 "asalto_a_peatones",
                 "asalto_peatones",
+                "robo_a_persona",
+                "robo_a_personas",
+                "robo_persona",
+                "robo_personas",
             })
         if "comercio" in base:
             aliases.update({
@@ -572,6 +577,11 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "asalto_comercio",
                 "asalto_comercios",
                 "asalto_a_locales_comerciales",
+                "robo_a_comercio",
+                "robo_a_comercios",
+                "robo_comercio",
+                "robo_comercios",
+                "robo_a_comercio_intimidacion",
             })
         if "vivienda" in base or "casa" in base:
             aliases.update({
@@ -581,6 +591,12 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "asalto_viviendas",
                 "asalto_a_casa",
                 "asalto_a_casas",
+                "robo_a_vivienda",
+                "robo_a_viviendas",
+                "robo_vivienda",
+                "robo_viviendas",
+                "robo_a_casa",
+                "robo_a_casas",
             })
         if "transporte" in base:
             aliases.update({
@@ -589,11 +605,50 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "asalto_en_transporte_publico",
                 "asalto_bus",
                 "asalto_autobus",
+                "robo_a_transporte_publico",
+                "robo_transporte_publico",
+                "robo_a_transporte_publico_con_intimidacion",
+                "robo_bus",
+                "robo_autobus",
             })
 
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
     aliases = {a for a in aliases if not is_unproductive_option(a)}
     return aliases
+
+
+def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text: str):
+    """
+    Permite fusionar categorías equivalentes para evitar duplicados visuales.
+    group_mode:
+      - exact: cuenta tokens
+      - merged: cuenta por fila si cualquier alias equivalente aparece
+    """
+    base = normalize_token_for_compare(descriptor_text)
+    label = clean_descriptor_display(descriptor_text)
+    group_mode = "exact"
+
+    # Comunidad 12
+    if file_type == "comunidad" and question_num == "12":
+        if base in {"consumo_de_drogas", "consumo_de_drogas_en_espacios_publicos"}:
+            return "Consumo de drogas", "merged"
+        if base in {"contaminacion_sonica", "escandalos_musicales_o_ruidos_excesivos"}:
+            return "Contaminación sónica", "merged"
+        if base in {"carencia_o_inexistencia_de_alumbrado_publico", "deficiencias_en_el_alumbrado_publico"}:
+            return "Carencia o inexistencia de alumbrado público", "merged"
+
+    # Comercio 20
+    if file_type == "comercio" and question_num == "20":
+        if ("persona" in base) or ("peaton" in base):
+            return "Asalto a personas", "merged"
+        if "comerc" in base:
+            return "Asalto a comercio", "merged"
+        if ("vivienda" in base) or ("casa" in base):
+            return "Asalto a vivienda", "merged"
+        if ("transporte" in base) or ("bus" in base) or ("autobus" in base):
+            return "Asalto a transporte público", "merged"
+
+    return label, group_mode
 
 
 def build_group_definitions(file_type: str, question_num: str, question_text: str, items: list):
@@ -609,22 +664,30 @@ def build_group_definitions(file_type: str, question_num: str, question_text: st
                 "group_label": unified_label,
                 "aliases": aliases,
                 "source_descriptors": {item["descriptor_texto"] for item in items},
+                "group_mode": "unified",
             }
         }
 
     groups = {}
     for item in items:
-        label = clean_descriptor_display(item["descriptor_texto"])
+        label, group_mode = get_exact_canonical_group(file_type, question_num, item["descriptor_texto"])
+
         if label not in groups:
             groups[label] = {
                 "group_label": label,
                 "aliases": set(),
                 "source_descriptors": set(),
+                "group_mode": group_mode,
             }
+
         groups[label]["aliases"].update(
             build_descriptor_aliases(file_type, question_num, item["descriptor_texto"])
         )
         groups[label]["source_descriptors"].add(item["descriptor_texto"])
+
+        if group_mode == "merged":
+            groups[label]["group_mode"] = "merged"
+
     return groups
 
 
@@ -750,17 +813,16 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
 
             for group_label, group_info in group_defs.items():
                 desc_norm = normalize_token_for_compare(group_label)
-
                 extra_matches = set()
 
                 for tok in csv_tokens:
-                    if "persona" in desc_norm and ("persona" in tok or "peaton" in tok):
+                    if "persona" in desc_norm and (("persona" in tok) or ("peaton" in tok)):
                         extra_matches.add(tok)
                     elif "comercio" in desc_norm and "comerc" in tok:
                         extra_matches.add(tok)
-                    elif ("vivienda" in desc_norm or "casa" in desc_norm) and ("vivienda" in tok or "casa" in tok):
+                    elif "vivienda" in desc_norm and (("vivienda" in tok) or ("casa" in tok)):
                         extra_matches.add(tok)
-                    elif "transporte" in desc_norm and ("transporte" in tok or "bus" in tok or "autobus" in tok):
+                    elif "transporte" in desc_norm and (("transporte" in tok) or ("bus" in tok) or ("autobus" in tok)):
                         extra_matches.add(tok)
 
                 group_info["aliases"].update(extra_matches)
@@ -770,7 +832,10 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
             matched_aliases_union.update(aliases)
 
             if is_exact_question(file_type, preg_num):
-                total, matched_tokens = count_group_exact(series, aliases)
+                if group_info.get("group_mode") == "merged":
+                    total, matched_tokens = count_group_unified(series, aliases)
+                else:
+                    total, matched_tokens = count_group_exact(series, aliases)
             else:
                 total, matched_tokens = count_group_unified(series, aliases)
 
