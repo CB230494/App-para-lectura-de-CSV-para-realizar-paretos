@@ -57,18 +57,13 @@ PATRONES_NO_OBSERVA = [
 # Preguntas que se mantienen desglosadas
 PREGUNTAS_EXACTAS = {
     "comunidad": {"12", "18", "20", "22", "24", "26", "27"},
-    "comercio": {"12", "18", "20"},
+    "comercio": {"12", "18", "20", "22"},
     "policia": None,
     "policial": None,
 }
 
-# Preguntas especiales con dos grupos:
-# 1) Estafa informática
-# 2) Estafa
-PREGUNTAS_ESTAFA_ESPECIAL = {
-    ("comunidad", "23"),
-    ("comercio", "21"),
-}
+# Estafas ahora van unificadas, no especiales
+PREGUNTAS_ESTAFA_ESPECIAL = set()
 
 # Etiquetas unificadas por pregunta
 UNIFIED_LABELS = {
@@ -77,6 +72,7 @@ UNIFIED_LABELS = {
     ("comunidad", "16"): "Espacios de riesgo",
     ("comunidad", "19"): "Venta de drogas",
     ("comunidad", "21"): "Delitos sexuales",
+    ("comunidad", "23"): "Estafa",
     ("comunidad", "25"): "Abandono de personas",
     ("comunidad", "28"): "Trata de personas",
 
@@ -84,6 +80,7 @@ UNIFIED_LABELS = {
     ("comercio", "14"): "Infraestructura vial",
     ("comercio", "15"): "Espacios de riesgo",
     ("comercio", "19"): "Venta de drogas",
+    ("comercio", "21"): "Estafa",
 }
 
 # =========================================================
@@ -538,6 +535,31 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
     if base in alias_map:
         aliases.update(alias_map[base])
 
+    # Refuerzo para preguntas de estafa ya unificadas
+    if (
+        (file_type == "comunidad" and question_num == "23")
+        or (file_type == "comercio" and question_num == "21")
+    ):
+        if "estafa" in base or "fraude" in base:
+            aliases.update({
+                "estafa",
+                "estafa_informatica",
+                "fraude",
+                "fraude_informatico",
+                "estafa_por_medios_informaticos",
+                "estafa_por_internet",
+                "estafa_digital",
+                "estafa_electronica",
+                "estafa_telefonica",
+                "estafa_bancaria",
+                "estafa_por_redes_sociales",
+                "estafa_documental",
+                "estafa_simple",
+                "estafa_en_compras",
+                "estafa_comercial",
+                "estafa_por_medio_electronico",
+            })
+
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
     aliases = {a for a in aliases if not is_unproductive_option(a)}
     return aliases
@@ -545,82 +567,11 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
 
 def build_group_definitions(file_type: str, question_num: str, question_text: str, items: list):
     """
-    Para preguntas especiales de estafa:
-      devuelve 2 grupos dinámicos:
-      - Estafa informática
-      - Estafa
     Para preguntas exactas:
       devuelve grupos por descriptor
     Para preguntas unificadas:
       devuelve 1 solo grupo con el nombre de la pregunta
     """
-    if is_estafa_special(file_type, question_num):
-        dynamic_tokens = set()
-
-        for item in items:
-            tok = normalize_token_for_compare(item["descriptor_texto"])
-            if tok and not is_unproductive_option(tok):
-                dynamic_tokens.add(tok)
-
-        estafa_informatica_aliases = set()
-        estafa_aliases = set()
-
-        for tok in dynamic_tokens:
-            if "estafa" in tok or "fraude" in tok:
-                if "informat" in tok or "digital" in tok or "internet" in tok or "electron" in tok:
-                    estafa_informatica_aliases.add(tok)
-                else:
-                    estafa_aliases.add(tok)
-
-        estafa_informatica_aliases.update({
-            "estafa_informatica",
-            "fraude_informatico",
-            "estafa_por_medios_informaticos",
-            "estafa_por_internet",
-            "estafa_digital",
-            "estafa_electronica",
-        })
-
-        estafa_aliases.update({
-            "estafa",
-            "estafa_telefonica",
-            "estafa_bancaria",
-            "estafa_por_redes_sociales",
-            "estafa_por_medio_electronico",
-            "estafa_documental",
-            "estafa_simple",
-            "estafa_en_compras",
-            "estafa_comercial",
-            "fraude",
-        })
-
-        estafa_informatica_aliases = {
-            normalize_token_for_compare(a)
-            for a in estafa_informatica_aliases
-            if a and not is_unproductive_option(normalize_token_for_compare(a))
-        }
-
-        estafa_aliases = {
-            normalize_token_for_compare(a)
-            for a in estafa_aliases
-            if a and not is_unproductive_option(normalize_token_for_compare(a))
-        }
-
-        estafa_aliases = estafa_aliases - estafa_informatica_aliases
-
-        return {
-            "Estafa informática": {
-                "group_label": "Estafa informática",
-                "aliases": estafa_informatica_aliases,
-                "source_descriptors": {"Estafa informática"},
-            },
-            "Estafa": {
-                "group_label": "Estafa",
-                "aliases": estafa_aliases,
-                "source_descriptors": {"Estafa"},
-            }
-        }
-
     if not is_exact_question(file_type, question_num):
         unified_label = get_unified_label(file_type, question_num, question_text)
         aliases = set()
@@ -732,13 +683,8 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
 
     for (preg_num, preg_text), items in grouped_questions.items():
         question_col, score = find_question_column(df_csv, preg_num, preg_text)
-
         group_defs = build_group_definitions(file_type, preg_num, preg_text, items)
-
-        if is_estafa_special(file_type, preg_num):
-            mode_label = "especial_estafa"
-        else:
-            mode_label = "exacto" if is_exact_question(file_type, preg_num) else "unificado"
+        mode_label = "exacto" if is_exact_question(file_type, preg_num) else "unificado"
 
         if not question_col:
             for group_label in group_defs:
@@ -771,39 +717,34 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         matched_aliases_union = set()
         series = df_csv[question_col]
 
-        # Refuerzo dinámico con tokens reales del CSV para estafas
-        if is_estafa_special(file_type, preg_num):
+        # Refuerzo dinámico para comercio 20
+        if file_type == "comercio" and preg_num == "20":
             csv_tokens = set()
             for val in series:
                 csv_tokens.update(tokenize_cell_unique(val))
 
-            if "Estafa informática" in group_defs:
-                extra_inf = {
-                    t for t in csv_tokens
-                    if ("estafa" in t or "fraude" in t)
-                    and ("informat" in t or "digital" in t or "internet" in t or "electron" in t)
-                }
-                group_defs["Estafa informática"]["aliases"].update(extra_inf)
+            for group_label, group_info in group_defs.items():
+                desc_norm = normalize_token_for_compare(group_label)
+                extra_matches = set()
 
-            if "Estafa" in group_defs:
-                extra_est = {
-                    t for t in csv_tokens
-                    if ("estafa" in t or "fraude" in t)
-                    and not ("informat" in t or "digital" in t or "internet" in t or "electron" in t)
-                }
-                group_defs["Estafa"]["aliases"].update(extra_est)
+                for tok in csv_tokens:
+                    if tok == desc_norm:
+                        extra_matches.add(tok)
+                    elif tok.startswith(desc_norm + "_"):
+                        extra_matches.add(tok)
+                    elif desc_norm.startswith(tok + "_"):
+                        extra_matches.add(tok)
+
+                group_info["aliases"].update(extra_matches)
 
         for group_label, group_info in group_defs.items():
             aliases = group_info["aliases"]
             matched_aliases_union.update(aliases)
 
-            if is_estafa_special(file_type, preg_num):
-                total, matched_tokens = count_group_unified(series, aliases)
+            if is_exact_question(file_type, preg_num):
+                total, matched_tokens = count_group_exact(series, aliases)
             else:
-                if is_exact_question(file_type, preg_num):
-                    total, matched_tokens = count_group_exact(series, aliases)
-                else:
-                    total, matched_tokens = count_group_unified(series, aliases)
+                total, matched_tokens = count_group_unified(series, aliases)
 
             results.append({
                 "archivo": filename,
