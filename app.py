@@ -58,11 +58,13 @@ PATRONES_NO_OBSERVA = [
 PREGUNTAS_EXACTAS = {
     "comunidad": {"12", "18", "20", "22", "24", "26", "27"},
     "comercio": {"12", "18", "20"},
-    "policia": None,
-    "policial": None,
+    "policia": None,   # todo exacto
+    "policial": None,  # todo exacto
 }
 
-# Preguntas con regla especial de estafas
+# Preguntas especiales con dos grupos:
+# 1) Estafa informática
+# 2) Estafa
 PREGUNTAS_ESTAFA_ESPECIAL = {
     ("comunidad", "23"),
     ("comercio", "21"),
@@ -75,7 +77,6 @@ UNIFIED_LABELS = {
     ("comunidad", "16"): "Espacios de riesgo",
     ("comunidad", "19"): "Venta de drogas",
     ("comunidad", "21"): "Delitos sexuales",
-    ("comunidad", "23"): "Estafa",
     ("comunidad", "25"): "Abandono de personas",
     ("comunidad", "28"): "Trata de personas",
 
@@ -83,7 +84,6 @@ UNIFIED_LABELS = {
     ("comercio", "15"): "Infraestructura vial",
     ("comercio", "16"): "Espacios de riesgo",
     ("comercio", "19"): "Venta de drogas",
-    ("comercio", "21"): "Estafa",
 }
 
 # =========================================================
@@ -424,7 +424,7 @@ def find_question_column(df: pd.DataFrame, question_num: str, question_text: str
 
 
 # =========================================================
-# RESPUESTAS DENTRO DE CELDAS
+# RESPUESTAS EN CELDAS
 # =========================================================
 def split_multiselect_cell(value: str):
     if is_effectively_empty(value):
@@ -472,7 +472,7 @@ def tokenize_cell_unique(value: str):
 
 
 # =========================================================
-# REGLAS POR PREGUNTA
+# REGLAS DE CONTEO
 # =========================================================
 def is_exact_question(file_type: str, question_num: str) -> bool:
     exacts = PREGUNTAS_EXACTAS.get(file_type)
@@ -538,26 +538,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
     if base in alias_map:
         aliases.update(alias_map[base])
 
-    if is_estafa_special(file_type, question_num):
-        if "estafa" in base and "informatica" in base:
-            aliases = {
-                "estafa_informatica",
-                "fraude_informatico",
-                "estafa_por_medios_informaticos",
-            }
-        elif "estafa" in base:
-            aliases = {
-                "estafa",
-                "estafa_telefonica",
-                "estafa_bancaria",
-                "estafa_por_redes_sociales",
-                "estafa_por_medio_electronico",
-                "estafa_documental",
-                "estafa_simple",
-                "estafa_en_compras",
-                "estafa_comercial",
-            }
-
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
     aliases = {a for a in aliases if not is_unproductive_option(a)}
     return aliases
@@ -565,11 +545,59 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
 
 def build_group_definitions(file_type: str, question_num: str, question_text: str, items: list):
     """
+    Para preguntas especiales de estafa:
+      devuelve 2 grupos: Estafa informática y Estafa
     Para preguntas exactas:
-      devuelve grupos por descriptor.
+      devuelve grupos por descriptor
     Para preguntas unificadas:
-      devuelve un solo grupo con el nombre de la pregunta.
+      devuelve 1 solo grupo con el nombre de la pregunta
     """
+    if is_estafa_special(file_type, question_num):
+        estafa_informatica_aliases = {
+            "estafa_informatica",
+            "fraude_informatico",
+            "estafa_por_medios_informaticos",
+            "estafa_por_internet",
+            "estafa_digital",
+        }
+        estafa_aliases = {
+            "estafa",
+            "estafa_telefonica",
+            "estafa_bancaria",
+            "estafa_por_redes_sociales",
+            "estafa_por_medio_electronico",
+            "estafa_documental",
+            "estafa_simple",
+            "estafa_en_compras",
+            "estafa_comercial",
+            "fraude",
+        }
+
+        estafa_informatica_aliases = {
+            normalize_token_for_compare(a) for a in estafa_informatica_aliases
+            if a and not is_unproductive_option(normalize_token_for_compare(a))
+        }
+        estafa_aliases = {
+            normalize_token_for_compare(a) for a in estafa_aliases
+            if a and not is_unproductive_option(normalize_token_for_compare(a))
+        }
+
+        # Evitar solape
+        estafa_aliases = estafa_aliases - estafa_informatica_aliases
+
+        return {
+            "Estafa informática": {
+                "group_label": "Estafa informática",
+                "aliases": estafa_informatica_aliases,
+                "source_descriptors": {"Estafa informática"},
+            },
+            "Estafa": {
+                "group_label": "Estafa",
+                "aliases": estafa_aliases,
+                "source_descriptors": {"Estafa"},
+            }
+        }
+
     if not is_exact_question(file_type, question_num):
         unified_label = get_unified_label(file_type, question_num, question_text)
         aliases = set()
@@ -683,8 +711,11 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         question_col, score = find_question_column(df_csv, preg_num, preg_text)
 
         group_defs = build_group_definitions(file_type, preg_num, preg_text, items)
-        exact_mode = is_exact_question(file_type, preg_num)
-        mode_label = "exacto" if exact_mode else "unificado"
+
+        if is_estafa_special(file_type, preg_num):
+            mode_label = "especial_estafa"
+        else:
+            mode_label = "exacto" if is_exact_question(file_type, preg_num) else "unificado"
 
         if not question_col:
             for group_label in group_defs:
@@ -721,10 +752,14 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
             aliases = group_info["aliases"]
             matched_aliases_union.update(aliases)
 
-            if exact_mode:
-                total, matched_tokens = count_group_exact(series, aliases)
-            else:
+            # Regla especial de estafa: siempre unificada por fila
+            if is_estafa_special(file_type, preg_num):
                 total, matched_tokens = count_group_unified(series, aliases)
+            else:
+                if is_exact_question(file_type, preg_num):
+                    total, matched_tokens = count_group_exact(series, aliases)
+                else:
+                    total, matched_tokens = count_group_unified(series, aliases)
 
             results.append({
                 "archivo": filename,
