@@ -523,41 +523,65 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "personas_en_situacion_de_calle",
         },
 
-        # NUEVO REFUERZO PARA PROSTITUCIÓN
+        # Prostitución
         "zona_donde_se_ejerce_prostitucion": {
             "zona_donde_se_ejerce_prostitucion",
+            "zonas_donde_se_ejerce_prostitucion",
             "zona_de_prostitucion",
+            "zonas_de_prostitucion",
             "prostitucion",
             "ejercicio_de_la_prostitucion",
             "zona_donde_hay_prostitucion",
+            "sitios_donde_se_ejerce_prostitucion",
+        },
+        "zonas_donde_se_ejerce_prostitucion": {
+            "zona_donde_se_ejerce_prostitucion",
             "zonas_donde_se_ejerce_prostitucion",
+            "zona_de_prostitucion",
+            "zonas_de_prostitucion",
+            "prostitucion",
+            "ejercicio_de_la_prostitucion",
+            "zona_donde_hay_prostitucion",
             "sitios_donde_se_ejerce_prostitucion",
         },
         "zona_de_prostitucion": {
             "zona_donde_se_ejerce_prostitucion",
+            "zonas_donde_se_ejerce_prostitucion",
             "zona_de_prostitucion",
+            "zonas_de_prostitucion",
             "prostitucion",
             "ejercicio_de_la_prostitucion",
             "zona_donde_hay_prostitucion",
+            "sitios_donde_se_ejerce_prostitucion",
+        },
+        "zonas_de_prostitucion": {
+            "zona_donde_se_ejerce_prostitucion",
             "zonas_donde_se_ejerce_prostitucion",
+            "zona_de_prostitucion",
+            "zonas_de_prostitucion",
+            "prostitucion",
+            "ejercicio_de_la_prostitucion",
+            "zona_donde_hay_prostitucion",
             "sitios_donde_se_ejerce_prostitucion",
         },
         "ejercicio_de_la_prostitucion": {
             "zona_donde_se_ejerce_prostitucion",
+            "zonas_donde_se_ejerce_prostitucion",
             "zona_de_prostitucion",
+            "zonas_de_prostitucion",
             "prostitucion",
             "ejercicio_de_la_prostitucion",
             "zona_donde_hay_prostitucion",
-            "zonas_donde_se_ejerce_prostitucion",
             "sitios_donde_se_ejerce_prostitucion",
         },
         "prostitucion": {
             "zona_donde_se_ejerce_prostitucion",
+            "zonas_donde_se_ejerce_prostitucion",
             "zona_de_prostitucion",
+            "zonas_de_prostitucion",
             "prostitucion",
             "ejercicio_de_la_prostitucion",
             "zona_donde_hay_prostitucion",
-            "zonas_donde_se_ejerce_prostitucion",
             "sitios_donde_se_ejerce_prostitucion",
         },
 
@@ -680,13 +704,21 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
     if file_type == "comunidad" and question_num == "12":
         if base in {"consumo_de_drogas", "consumo_de_drogas_en_espacios_publicos"}:
             return "Consumo de drogas", "merged"
+
         if base in {"contaminacion_sonica", "escandalos_musicales_o_ruidos_excesivos"}:
             return "Contaminación sónica", "merged"
-        if base in {"carencia_o_inexistencia_de_alumbrado_publico", "deficiencias_en_el_alumbrado_publico"}:
+
+        if base in {
+            "carencia_o_inexistencia_de_alumbrado_publico",
+            "deficiencias_en_el_alumbrado_publico"
+        }:
             return "Carencia o inexistencia de alumbrado público", "merged"
+
         if base in {
             "zona_donde_se_ejerce_prostitucion",
+            "zonas_donde_se_ejerce_prostitucion",
             "zona_de_prostitucion",
+            "zonas_de_prostitucion",
             "ejercicio_de_la_prostitucion",
             "prostitucion",
         }:
@@ -894,7 +926,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 if "prostit" in desc_norm:
                     extra_prostitucion = {
                         tok for tok in csv_tokens
-                        if ("prostit" in tok)
+                        if "prostit" in tok
                     }
                     group_info["aliases"].update(extra_prostitucion)
 
