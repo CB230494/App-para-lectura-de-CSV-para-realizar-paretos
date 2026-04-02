@@ -585,6 +585,32 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "sitios_donde_se_ejerce_prostitucion",
         },
 
+        # Extorsión / Extorción en comercio 18
+        "extorsion": {
+            "extorsion",
+            "extorcion",
+            "extorsiones",
+            "extorciones",
+            "cobro_ilegal",
+            "cobro_ilegal_a_comercios",
+            "exigencias_indebidas",
+            "exigencias_ilegales",
+            "intimidacion_para_exigir_cobro",
+            "amenazas_o_intimidacion_para_exigir_cobro_de_dinero_u_otros_beneficios_de_manera_ilegal_a_comercios",
+        },
+        "extorcion": {
+            "extorsion",
+            "extorcion",
+            "extorsiones",
+            "extorciones",
+            "cobro_ilegal",
+            "cobro_ilegal_a_comercios",
+            "exigencias_indebidas",
+            "exigencias_ilegales",
+            "intimidacion_para_exigir_cobro",
+            "amenazas_o_intimidacion_para_exigir_cobro_de_dinero_u_otros_beneficios_de_manera_ilegal_a_comercios",
+        },
+
         "ventas_informales_ambulantes": {"ventas_informales_ambulantes"},
         "problemas_vecinales_o_conflictos_entre_vecinos": {"problemas_vecinales_o_conflictos_entre_vecinos"},
         "desvinculacion_escolar_desercion_escolar": {"desvinculacion_escolar_desercion_escolar"},
@@ -684,6 +710,22 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "robo_autobus",
             })
 
+    # Comercio 18: extorsión / extorción
+    if file_type == "comercio" and question_num == "18":
+        if ("extors" in base) or ("extorc" in base) or ("extorc" in norm(descriptor_text)):
+            aliases.update({
+                "extorsion",
+                "extorcion",
+                "extorsiones",
+                "extorciones",
+                "cobro_ilegal",
+                "cobro_ilegal_a_comercios",
+                "exigencias_indebidas",
+                "exigencias_ilegales",
+                "intimidacion_para_exigir_cobro",
+                "amenazas_o_intimidacion_para_exigir_cobro_de_dinero_u_otros_beneficios_de_manera_ilegal_a_comercios",
+            })
+
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
     aliases = {a for a in aliases if not is_unproductive_option(a)}
     return aliases
@@ -723,6 +765,16 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
             "prostitucion",
         }:
             return "Zona donde se ejerce prostitución", "merged"
+
+    # Comercio 18: unificar extorsión / extorción
+    if file_type == "comercio" and question_num == "18":
+        if (
+            "extors" in base
+            or "extorc" in base
+            or "exigencias_indebidas" in base
+            or "cobro_ilegal" in base
+        ):
+            return "Extorsión (amenazas o intimidación para exigir cobro de dinero u otros beneficios de manera ilegal a comercios)", "merged"
 
     # Comercio 20
     if file_type == "comercio" and question_num == "20":
@@ -836,6 +888,105 @@ def find_unmapped_tokens(series: pd.Series, matched_aliases_union: set):
 
 
 # =========================================================
+# REGLA ESPECIAL: COMERCIO 18 -> COMERCIO 12
+# Extorsión / Extorción se suma a:
+# "Intentos de cobro ilegal o exigencias indebidas en la zona comercial"
+# y se elimina visualmente de la 18
+# =========================================================
+def is_comercio_q18_extorsion_descriptor(desc: str) -> bool:
+    d = norm(desc)
+    return (
+        "extorsion" in d
+        or "extorcion" in d
+        or (
+            "amenazas" in d
+            and "intimidacion" in d
+            and "exigir cobro" in d
+        )
+    )
+
+
+def is_comercio_q12_cobro_ilegal_descriptor(desc: str) -> bool:
+    d = norm(desc)
+    return (
+        (
+            "intentos de cobro ilegal" in d
+            or "cobro ilegal" in d
+        )
+        and (
+            "exigencias indebidas" in d
+            or "zona comercial" in d
+            or "comercial" in d
+        )
+    )
+
+
+def apply_special_cross_question_rules(df_results: pd.DataFrame) -> pd.DataFrame:
+    if df_results.empty:
+        return df_results
+
+    df_results = df_results.copy()
+
+    # Buscar fila origen: comercio / pregunta 18 / extorsión
+    mask_src = (
+        (df_results["tipo"] == "comercio")
+        & (df_results["pregunta_num"].astype(str) == "18")
+        & (df_results["descriptor"].astype(str).apply(is_comercio_q18_extorsion_descriptor))
+    )
+
+    if not mask_src.any():
+        return df_results
+
+    src_rows = df_results[mask_src].copy()
+    traslado_total = int(src_rows["cantidad_respuestas"].sum())
+
+    if traslado_total <= 0:
+        return df_results
+
+    # Buscar destino: comercio / pregunta 12 / cobro ilegal o exigencias indebidas
+    mask_dst = (
+        (df_results["tipo"] == "comercio")
+        & (df_results["pregunta_num"].astype(str) == "12")
+        & (df_results["descriptor"].astype(str).apply(is_comercio_q12_cobro_ilegal_descriptor))
+    )
+
+    # tokens origen para anexar trazabilidad al destino
+    src_tokens = []
+    for txt in src_rows["opciones_csv_que_contaron"].fillna("").astype(str).tolist():
+        if txt.strip():
+            src_tokens.extend([p.strip() for p in txt.split("|") if p.strip()])
+    src_tokens = sorted(set(src_tokens))
+
+    if mask_dst.any():
+        dst_idx = df_results[mask_dst].index[0]
+        df_results.at[dst_idx, "cantidad_respuestas"] = int(df_results.at[dst_idx, "cantidad_respuestas"]) + traslado_total
+
+        current_tokens = str(df_results.at[dst_idx, "opciones_csv_que_contaron"] or "").strip()
+        dst_tokens = [p.strip() for p in current_tokens.split("|") if p.strip()] if current_tokens else []
+        merged_tokens = sorted(set(dst_tokens + src_tokens))
+        df_results.at[dst_idx, "opciones_csv_que_contaron"] = " | ".join(merged_tokens)
+    else:
+        # Si no encuentra la fila destino, la crea usando metadatos existentes de la pregunta 12
+        q12_rows = df_results[
+            (df_results["tipo"] == "comercio")
+            & (df_results["pregunta_num"].astype(str) == "12")
+        ].copy()
+
+        if not q12_rows.empty:
+            ref = q12_rows.iloc[0].to_dict()
+            new_row = ref.copy()
+            new_row["descriptor"] = "Intentos de cobro ilegal o exigencias indebidas en la zona comercial"
+            new_row["cantidad_respuestas"] = traslado_total
+            new_row["opciones_csv_que_contaron"] = " | ".join(src_tokens)
+            df_results = pd.concat([df_results, pd.DataFrame([new_row])], ignore_index=True)
+
+    # eliminar visualmente la extorsión de la pregunta 18
+    df_results = df_results[~mask_src].copy()
+
+    return df_results
+
+
+# =========================================================
 # PROCESAMIENTO
 # =========================================================
 def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
@@ -930,6 +1081,31 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                     }
                     group_info["aliases"].update(extra_prostitucion)
 
+        # Refuerzo dinámico para extorsión en comercio 18
+        if file_type == "comercio" and preg_num == "18":
+            csv_tokens = set()
+            for val in series:
+                csv_tokens.update(tokenize_cell_unique(val))
+
+            for group_label, group_info in group_defs.items():
+                desc_norm = normalize_token_for_compare(group_label)
+
+                if (
+                    "extors" in desc_norm
+                    or "extorc" in desc_norm
+                    or "exigir_cobro" in desc_norm
+                ):
+                    extra_extorsion = {
+                        tok for tok in csv_tokens
+                        if (
+                            "extors" in tok
+                            or "extorc" in tok
+                            or "cobro_ilegal" in tok
+                            or "exigencias_indebidas" in tok
+                        )
+                    }
+                    group_info["aliases"].update(extra_extorsion)
+
         # Refuerzo dinámico para estafa unificada en comunidad 23 y comercio 21
         if (
             (file_type == "comunidad" and preg_num == "23")
@@ -1010,6 +1186,9 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
     df_results = pd.DataFrame(results)
     df_mapping = pd.DataFrame(mapping_info)
     df_unmapped = pd.DataFrame(unmapped_options_rows)
+
+    # aplicar regla especial de traslado
+    df_results = apply_special_cross_question_rules(df_results)
 
     return df_results, df_mapping, df_unmapped
 
