@@ -494,6 +494,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
         },
         "consumo_de_drogas_en_espacios_publicos": {
             "consumo_de_drogas_en_espacios_publicos",
+            "consumo_de_drogas",
         },
         "contaminacion_sonica": {
             "escandalos_musicales_o_ruidos_excesivos",
@@ -514,7 +515,52 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
         "presencia_de_personas_en_situacion_de_calle": {
             "presencia_de_personas_en_situacion_de_calle",
             "presencia_de_personas_en_situacion_de_calle_personas_que_viven_permanentemente_en_la_via_publica",
+            "personas_en_situacion_de_calle",
         },
+        "presencia_de_personas_en_situacion_de_calle_personas_que_viven_permanentemente_en_la_via_publica": {
+            "presencia_de_personas_en_situacion_de_calle_personas_que_viven_permanentemente_en_la_via_publica",
+            "presencia_de_personas_en_situacion_de_calle",
+            "personas_en_situacion_de_calle",
+        },
+
+        # NUEVO REFUERZO PARA PROSTITUCIÓN
+        "zona_donde_se_ejerce_prostitucion": {
+            "zona_donde_se_ejerce_prostitucion",
+            "zona_de_prostitucion",
+            "prostitucion",
+            "ejercicio_de_la_prostitucion",
+            "zona_donde_hay_prostitucion",
+            "zonas_donde_se_ejerce_prostitucion",
+            "sitios_donde_se_ejerce_prostitucion",
+        },
+        "zona_de_prostitucion": {
+            "zona_donde_se_ejerce_prostitucion",
+            "zona_de_prostitucion",
+            "prostitucion",
+            "ejercicio_de_la_prostitucion",
+            "zona_donde_hay_prostitucion",
+            "zonas_donde_se_ejerce_prostitucion",
+            "sitios_donde_se_ejerce_prostitucion",
+        },
+        "ejercicio_de_la_prostitucion": {
+            "zona_donde_se_ejerce_prostitucion",
+            "zona_de_prostitucion",
+            "prostitucion",
+            "ejercicio_de_la_prostitucion",
+            "zona_donde_hay_prostitucion",
+            "zonas_donde_se_ejerce_prostitucion",
+            "sitios_donde_se_ejerce_prostitucion",
+        },
+        "prostitucion": {
+            "zona_donde_se_ejerce_prostitucion",
+            "zona_de_prostitucion",
+            "prostitucion",
+            "ejercicio_de_la_prostitucion",
+            "zona_donde_hay_prostitucion",
+            "zonas_donde_se_ejerce_prostitucion",
+            "sitios_donde_se_ejerce_prostitucion",
+        },
+
         "ventas_informales_ambulantes": {"ventas_informales_ambulantes"},
         "problemas_vecinales_o_conflictos_entre_vecinos": {"problemas_vecinales_o_conflictos_entre_vecinos"},
         "desvinculacion_escolar_desercion_escolar": {"desvinculacion_escolar_desercion_escolar"},
@@ -638,6 +684,13 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
             return "Contaminación sónica", "merged"
         if base in {"carencia_o_inexistencia_de_alumbrado_publico", "deficiencias_en_el_alumbrado_publico"}:
             return "Carencia o inexistencia de alumbrado público", "merged"
+        if base in {
+            "zona_donde_se_ejerce_prostitucion",
+            "zona_de_prostitucion",
+            "ejercicio_de_la_prostitucion",
+            "prostitucion",
+        }:
+            return "Zona donde se ejerce prostitución", "merged"
 
     # Comercio 20
     if file_type == "comercio" and question_num == "20":
@@ -828,6 +881,22 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                         extra_matches.add(tok)
 
                 group_info["aliases"].update(extra_matches)
+
+        # Refuerzo dinámico para prostitución en comunidad 12
+        if file_type == "comunidad" and preg_num == "12":
+            csv_tokens = set()
+            for val in series:
+                csv_tokens.update(tokenize_cell_unique(val))
+
+            for group_label, group_info in group_defs.items():
+                desc_norm = normalize_token_for_compare(group_label)
+
+                if "prostit" in desc_norm:
+                    extra_prostitucion = {
+                        tok for tok in csv_tokens
+                        if ("prostit" in tok)
+                    }
+                    group_info["aliases"].update(extra_prostitucion)
 
         # Refuerzo dinámico para estafa unificada en comunidad 23 y comercio 21
         if (
