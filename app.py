@@ -153,8 +153,6 @@ def normalize_common_typos(token: str) -> str:
         "ocacional": "ocasional",
         "extorcion": "extorsion",
         "extorciones": "extorsiones",
-        "via_publica": "via_publica",
-        "modalidad_expres": "modalidad_expres",
     }
 
     for bad, good in typo_map.items():
@@ -633,6 +631,32 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "amenazas_o_intimidacion_para_exigir_cobro_de_dinero_u_otros_beneficios_de_manera_ilegal_a_comercios",
         },
 
+        # Oferta de servicios y oportunidades
+        "falta_de_oferta_educativa": {
+            "falta_de_oferta_educativa",
+            "falta_de_oferta_laboral",
+            "falta_de_oferta_recreativa",
+            "falta_de_actividades_culturales",
+        },
+        "falta_de_oferta_laboral": {
+            "falta_de_oferta_educativa",
+            "falta_de_oferta_laboral",
+            "falta_de_oferta_recreativa",
+            "falta_de_actividades_culturales",
+        },
+        "falta_de_oferta_recreativa": {
+            "falta_de_oferta_educativa",
+            "falta_de_oferta_laboral",
+            "falta_de_oferta_recreativa",
+            "falta_de_actividades_culturales",
+        },
+        "falta_de_actividades_culturales": {
+            "falta_de_oferta_educativa",
+            "falta_de_oferta_laboral",
+            "falta_de_oferta_recreativa",
+            "falta_de_actividades_culturales",
+        },
+
         "ventas_informales_ambulantes": {"ventas_informales_ambulantes"},
         "problemas_vecinales_o_conflictos_entre_vecinos": {"problemas_vecinales_o_conflictos_entre_vecinos"},
         "desvinculacion_escolar_desercion_escolar": {"desvinculacion_escolar_desercion_escolar"},
@@ -748,7 +772,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "amenazas_o_intimidacion_para_exigir_cobro_de_dinero_u_otros_beneficios_de_manera_ilegal_a_comercios",
             })
 
-    # Comercio 19: venta de drogas -> cubrir variantes y typo "ocacional"
+    # Comercio 19: venta de drogas
     if file_type == "comercio" and question_num == "19":
         if any(x in base_norm for x in [
             "en_via_publica",
@@ -761,7 +785,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             aliases.update({
                 "en_via_publica",
                 "en_espacios_cerrados_casas_edificaciones_u_otros_inmuebles",
-                "de_forma_ocasional_o_movil_modalidad_expres_sin_punto_fijo",
                 "de_forma_ocasional_o_movil_modalidad_expres_sin_punto_fijo",
                 "venta_de_drogas",
             })
@@ -1165,6 +1188,25 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                         )
                     }
                     group_info["aliases"].update(extra_drogas)
+
+        # Refuerzo dinámico para oferta de servicios y oportunidades
+        if preg_num == "13" and file_type in {"comunidad", "comercio"}:
+            csv_tokens = set()
+            for val in series:
+                csv_tokens.update(tokenize_cell_unique(val))
+
+            for group_label, group_info in group_defs.items():
+                if normalize_token_for_compare(group_label) == "oferta_de_servicios_y_oportunidades":
+                    extra_oferta = {
+                        tok for tok in csv_tokens
+                        if (
+                            "falta_de_oferta_educativa" in tok
+                            or "falta_de_oferta_laboral" in tok
+                            or "falta_de_oferta_recreativa" in tok
+                            or "falta_de_actividades_culturales" in tok
+                        )
+                    }
+                    group_info["aliases"].update(extra_oferta)
 
         # Refuerzo dinámico para estafa unificada en comunidad 23 y comercio 21
         if (
