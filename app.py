@@ -143,10 +143,43 @@ def clean_descriptor_display(text: str) -> str:
     return s
 
 
+def normalize_common_typos(token: str) -> str:
+    """
+    Corrige variantes frecuentes del CSV para evitar perder conteos.
+    """
+    t = str(token)
+
+    typo_map = {
+        "ocacional": "ocasional",
+        "extorcion": "extorsion",
+        "extorciones": "extorsiones",
+        "via_publica": "via_publica",
+        "modalidad_expres": "modalidad_expres",
+    }
+
+    for bad, good in typo_map.items():
+        t = t.replace(bad, good)
+
+    return t
+
+
 def normalize_token_for_compare(token: str) -> str:
     t = normalize_option_token(token)
     t = t.strip("._- ")
+    t = normalize_common_typos(t)
+    t = re.sub(r"_+", "_", t).strip("_")
     return t
+
+
+def normalize_display_for_grouping(text: str) -> str:
+    """
+    Unifica etiquetas visuales para evitar duplicados como:
+    Hurto / Hurto.
+    """
+    s = clean_descriptor_display(text)
+    s = re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"[.;,:]+$", "", s).strip()
+    return s
 
 
 # =========================================================
@@ -232,7 +265,7 @@ def load_guide_excel(path_excel: str):
                 r["pregunta_num"],
                 norm(r["pregunta_texto"]),
                 norm(r["descriptor_texto"]),
-                r["descriptor_slug"],
+                normalize_token_for_compare(r["descriptor_slug"]),
             )
             if key not in seen and r["descriptor_slug"]:
                 seen.add(key)
@@ -485,7 +518,8 @@ def get_unified_label(file_type: str, question_num: str, question_text: str) -> 
 
 def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text: str):
     base = normalize_option_token(descriptor_text)
-    aliases = {base}
+    base_norm = normalize_token_for_compare(base)
+    aliases = {base_norm}
 
     alias_map = {
         "consumo_de_drogas": {
@@ -598,18 +632,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "intimidacion_para_exigir_cobro",
             "amenazas_o_intimidacion_para_exigir_cobro_de_dinero_u_otros_beneficios_de_manera_ilegal_a_comercios",
         },
-        "extorcion": {
-            "extorsion",
-            "extorcion",
-            "extorsiones",
-            "extorciones",
-            "cobro_ilegal",
-            "cobro_ilegal_a_comercios",
-            "exigencias_indebidas",
-            "exigencias_ilegales",
-            "intimidacion_para_exigir_cobro",
-            "amenazas_o_intimidacion_para_exigir_cobro_de_dinero_u_otros_beneficios_de_manera_ilegal_a_comercios",
-        },
 
         "ventas_informales_ambulantes": {"ventas_informales_ambulantes"},
         "problemas_vecinales_o_conflictos_entre_vecinos": {"problemas_vecinales_o_conflictos_entre_vecinos"},
@@ -625,15 +647,15 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
         "hurto_simple": {"hurto_simple", "hurto"},
     }
 
-    if base in alias_map:
-        aliases.update(alias_map[base])
+    if base_norm in alias_map:
+        aliases.update(alias_map[base_norm])
 
     # Estafas unificadas
     if (
         (file_type == "comunidad" and question_num == "23")
         or (file_type == "comercio" and question_num == "21")
     ):
-        if "estafa" in base or "fraude" in base:
+        if "estafa" in base_norm or "fraude" in base_norm:
             aliases.update({
                 "estafa",
                 "estafa_informatica",
@@ -657,7 +679,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
 
     # Comercio 20: asaltos, refuerzo exacto
     if file_type == "comercio" and question_num == "20":
-        if "persona" in base:
+        if "persona" in base_norm:
             aliases.update({
                 "asalto_a_personas",
                 "asalto_personas",
@@ -668,7 +690,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "robo_persona",
                 "robo_personas",
             })
-        if "comercio" in base:
+        if "comercio" in base_norm:
             aliases.update({
                 "asalto_a_comercio",
                 "asalto_a_comercios",
@@ -681,7 +703,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "robo_comercios",
                 "robo_a_comercio_intimidacion",
             })
-        if "vivienda" in base or "casa" in base:
+        if "vivienda" in base_norm or "casa" in base_norm:
             aliases.update({
                 "asalto_a_vivienda",
                 "asalto_a_viviendas",
@@ -696,7 +718,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "robo_a_casa",
                 "robo_a_casas",
             })
-        if "transporte" in base:
+        if "transporte" in base_norm:
             aliases.update({
                 "asalto_a_transporte_publico",
                 "asalto_transporte_publico",
@@ -712,7 +734,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
 
     # Comercio 18: extorsión / extorción
     if file_type == "comercio" and question_num == "18":
-        if ("extors" in base) or ("extorc" in base) or ("extorc" in norm(descriptor_text)):
+        if ("extors" in base_norm) or ("extorc" in base_norm):
             aliases.update({
                 "extorsion",
                 "extorcion",
@@ -724,6 +746,24 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "exigencias_ilegales",
                 "intimidacion_para_exigir_cobro",
                 "amenazas_o_intimidacion_para_exigir_cobro_de_dinero_u_otros_beneficios_de_manera_ilegal_a_comercios",
+            })
+
+    # Comercio 19: venta de drogas -> cubrir variantes y typo "ocacional"
+    if file_type == "comercio" and question_num == "19":
+        if any(x in base_norm for x in [
+            "en_via_publica",
+            "espacios_cerrados",
+            "forma_ocasional",
+            "modalidad_expres",
+            "punto_fijo",
+            "venta_de_drogas"
+        ]):
+            aliases.update({
+                "en_via_publica",
+                "en_espacios_cerrados_casas_edificaciones_u_otros_inmuebles",
+                "de_forma_ocasional_o_movil_modalidad_expres_sin_punto_fijo",
+                "de_forma_ocasional_o_movil_modalidad_expres_sin_punto_fijo",
+                "venta_de_drogas",
             })
 
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
@@ -739,7 +779,7 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
       - merged: cuenta por fila si cualquier alias equivalente aparece
     """
     base = normalize_token_for_compare(descriptor_text)
-    label = clean_descriptor_display(descriptor_text)
+    label = normalize_display_for_grouping(descriptor_text)
     group_mode = "exact"
 
     # Comunidad 12
@@ -786,6 +826,10 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
             return "Asalto a vivienda", "merged"
         if ("transporte" in base) or ("bus" in base) or ("autobus" in base):
             return "Asalto a transporte público", "merged"
+
+    # Policial / Policía: evitar duplicados tipo Hurto y Hurto.
+    if file_type in {"policial", "policia"}:
+        return normalize_display_for_grouping(descriptor_text), "exact"
 
     return label, group_mode
 
@@ -889,9 +933,6 @@ def find_unmapped_tokens(series: pd.Series, matched_aliases_union: set):
 
 # =========================================================
 # REGLA ESPECIAL: COMERCIO 18 -> COMERCIO 12
-# Extorsión / Extorción se suma a:
-# "Intentos de cobro ilegal o exigencias indebidas en la zona comercial"
-# y se elimina visualmente de la 18
 # =========================================================
 def is_comercio_q18_extorsion_descriptor(desc: str) -> bool:
     d = norm(desc)
@@ -927,7 +968,6 @@ def apply_special_cross_question_rules(df_results: pd.DataFrame) -> pd.DataFrame
 
     df_results = df_results.copy()
 
-    # Buscar fila origen: comercio / pregunta 18 / extorsión
     mask_src = (
         (df_results["tipo"] == "comercio")
         & (df_results["pregunta_num"].astype(str) == "18")
@@ -943,14 +983,12 @@ def apply_special_cross_question_rules(df_results: pd.DataFrame) -> pd.DataFrame
     if traslado_total <= 0:
         return df_results
 
-    # Buscar destino: comercio / pregunta 12 / cobro ilegal o exigencias indebidas
     mask_dst = (
         (df_results["tipo"] == "comercio")
         & (df_results["pregunta_num"].astype(str) == "12")
         & (df_results["descriptor"].astype(str).apply(is_comercio_q12_cobro_ilegal_descriptor))
     )
 
-    # tokens origen para anexar trazabilidad al destino
     src_tokens = []
     for txt in src_rows["opciones_csv_que_contaron"].fillna("").astype(str).tolist():
         if txt.strip():
@@ -966,7 +1004,6 @@ def apply_special_cross_question_rules(df_results: pd.DataFrame) -> pd.DataFrame
         merged_tokens = sorted(set(dst_tokens + src_tokens))
         df_results.at[dst_idx, "opciones_csv_que_contaron"] = " | ".join(merged_tokens)
     else:
-        # Si no encuentra la fila destino, la crea usando metadatos existentes de la pregunta 12
         q12_rows = df_results[
             (df_results["tipo"] == "comercio")
             & (df_results["pregunta_num"].astype(str) == "12")
@@ -980,7 +1017,6 @@ def apply_special_cross_question_rules(df_results: pd.DataFrame) -> pd.DataFrame
             new_row["opciones_csv_que_contaron"] = " | ".join(src_tokens)
             df_results = pd.concat([df_results, pd.DataFrame([new_row])], ignore_index=True)
 
-    # eliminar visualmente la extorsión de la pregunta 18
     df_results = df_results[~mask_src].copy()
 
     return df_results
@@ -1106,6 +1142,30 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                     }
                     group_info["aliases"].update(extra_extorsion)
 
+        # Refuerzo dinámico para comercio 19
+        if file_type == "comercio" and preg_num == "19":
+            csv_tokens = set()
+            for val in series:
+                csv_tokens.update(tokenize_cell_unique(val))
+
+            for group_label, group_info in group_defs.items():
+                desc_norm = normalize_token_for_compare(group_label)
+
+                if normalize_token_for_compare(group_label) == "venta_de_drogas" or "venta_de_drogas" in desc_norm:
+                    extra_drogas = {
+                        tok for tok in csv_tokens
+                        if (
+                            tok == "en_via_publica"
+                            or tok == "en_espacios_cerrados_casas_edificaciones_u_otros_inmuebles"
+                            or tok == "de_forma_ocasional_o_movil_modalidad_expres_sin_punto_fijo"
+                            or tok == "venta_de_drogas"
+                            or "forma_ocasional" in tok
+                            or "espacios_cerrados" in tok
+                            or "via_publica" in tok
+                        )
+                    }
+                    group_info["aliases"].update(extra_drogas)
+
         # Refuerzo dinámico para estafa unificada en comunidad 23 y comercio 21
         if (
             (file_type == "comunidad" and preg_num == "23")
@@ -1187,7 +1247,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
     df_mapping = pd.DataFrame(mapping_info)
     df_unmapped = pd.DataFrame(unmapped_options_rows)
 
-    # aplicar regla especial de traslado
     df_results = apply_special_cross_question_rules(df_results)
 
     return df_results, df_mapping, df_unmapped
@@ -1387,7 +1446,6 @@ df_unmapped_all = pd.concat(all_unmapped, ignore_index=True) if all_unmapped els
 df_summary = summarize_results(df_results_all)
 df_totals = build_global_totals(df_results_all)
 
-# quitar ceros
 df_results_all = remove_zero_rows(df_results_all, "cantidad_respuestas")
 df_summary = remove_zero_rows(df_summary, "cantidad_respuestas")
 df_totals = remove_zero_rows(df_totals, "cantidad_respuestas")
@@ -1396,7 +1454,6 @@ if not df_unmapped_all.empty:
     df_unmapped_all = remove_zero_rows(df_unmapped_all, "cantidad")
     df_unmapped_all = df_unmapped_all[df_unmapped_all["opcion_csv_no_ubicada"] != "[filas_vacias_ignoradas]"].copy()
 
-# filtros
 st.markdown("## Filtros")
 
 colf1, colf2, colf3 = st.columns(3)
@@ -1446,7 +1503,6 @@ df_totals_f = df_totals[
     df_totals["pregunta_num"].isin(filtro_pregunta)
 ].copy()
 
-# métricas
 st.markdown("## Resumen general")
 
 m1, m2, m3, m4 = st.columns(4)
@@ -1456,7 +1512,6 @@ m2.metric("Preguntas detectadas", len(df_results_all["pregunta_num"].unique()) i
 m3.metric("Resultados mostrados", len(df_results_all) if not df_results_all.empty else 0)
 m4.metric("Respuestas contabilizadas", int(df_results_all["cantidad_respuestas"].sum()) if not df_results_all.empty else 0)
 
-# tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Totales por descriptor",
     "Resumen por pregunta",
@@ -1497,7 +1552,6 @@ with tab5:
     else:
         st.dataframe(df_unmapped_f, use_container_width=True)
 
-# descarga
 dfs_export = {
     "totales_descriptor": df_totals_f,
     "resumen_pregunta": df_summary_f,
