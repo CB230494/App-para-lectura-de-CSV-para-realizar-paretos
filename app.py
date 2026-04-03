@@ -80,8 +80,7 @@ UNIFIED_LABELS = {
     ("comercio", "21"): "Estafa",
 }
 
-# Refuerzos directos para preguntas unificadas:
-# cuentan igual si el valor viene solo, primero, en medio o al final.
+# Refuerzos directos para preguntas unificadas
 UNIFIED_EXTRA_ALIASES = {
     ("comercio", "13"): {
         "falta_de_oferta_educativa",
@@ -199,15 +198,16 @@ def clean_descriptor_display(text: str) -> str:
 
 
 def normalize_common_typos(token: str) -> str:
-    """
-    Corrige variantes frecuentes del CSV para evitar perder conteos.
-    """
     t = str(token)
 
     typo_map = {
         "ocacional": "ocasional",
         "extorcion": "extorsion",
         "extorciones": "extorsiones",
+        "prestamo_gota_gota": "prestamo_gota_a_gota",
+        "prestamos_gota_gota": "prestamos_gota_a_gota",
+        "cobro_gota_gota": "cobro_gota_a_gota",
+        "cobros_gota_gota": "cobros_gota_a_gota",
     }
 
     for bad, good in typo_map.items():
@@ -225,10 +225,6 @@ def normalize_token_for_compare(token: str) -> str:
 
 
 def normalize_display_for_grouping(text: str) -> str:
-    """
-    Unifica etiquetas visuales para evitar duplicados como:
-    Hurto / Hurto.
-    """
     s = clean_descriptor_display(text)
     s = re.sub(r"\s+", " ", s).strip()
     s = re.sub(r"[.;,:]+$", "", s).strip()
@@ -610,7 +606,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "personas_en_situacion_de_calle",
         },
 
-        # Prostitución
         "zona_donde_se_ejerce_prostitucion": {
             "zona_donde_se_ejerce_prostitucion",
             "zonas_donde_se_ejerce_prostitucion",
@@ -622,7 +617,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "sitios_donde_se_ejerce_prostitucion",
         },
 
-        # Extorsión / Extorción en comercio 18
         "extorsion": {
             "extorsion",
             "extorcion",
@@ -636,7 +630,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "amenazas_o_intimidacion_para_exigir_cobro_de_dinero_u_otros_beneficios_de_manera_ilegal_a_comercios",
         },
 
-        # Oferta de servicios y oportunidades
         "falta_de_oferta_educativa": {
             "falta_de_oferta_educativa",
             "falta_de_oferta_laboral",
@@ -662,7 +655,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "falta_de_actividades_culturales",
         },
 
-        # Infraestructura vial
         "calles_en_mal_estado": {
             "calles_en_mal_estado",
             "falta_de_iluminacion",
@@ -688,6 +680,38 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "falta_o_deterioro_de_aceras",
         },
 
+        # Policial: préstamos gota a gota
+        "prestamos_gota_a_gota": {
+            "prestamos_gota_a_gota",
+            "prestamo_gota_a_gota",
+            "gota_a_gota",
+            "prestamos_tipo_gota_a_gota",
+            "prestamos_gota_gota",
+            "prestamo_gota_gota",
+            "cobro_gota_a_gota",
+            "cobros_gota_a_gota",
+        },
+        "prestamo_gota_a_gota": {
+            "prestamos_gota_a_gota",
+            "prestamo_gota_a_gota",
+            "gota_a_gota",
+            "prestamos_tipo_gota_a_gota",
+            "prestamos_gota_gota",
+            "prestamo_gota_gota",
+            "cobro_gota_a_gota",
+            "cobros_gota_a_gota",
+        },
+        "gota_a_gota": {
+            "prestamos_gota_a_gota",
+            "prestamo_gota_a_gota",
+            "gota_a_gota",
+            "prestamos_tipo_gota_a_gota",
+            "prestamos_gota_gota",
+            "prestamo_gota_gota",
+            "cobro_gota_a_gota",
+            "cobros_gota_a_gota",
+        },
+
         "ventas_informales_ambulantes": {"ventas_informales_ambulantes"},
         "problemas_vecinales_o_conflictos_entre_vecinos": {"problemas_vecinales_o_conflictos_entre_vecinos"},
         "desvinculacion_escolar_desercion_escolar": {"desvinculacion_escolar_desercion_escolar"},
@@ -705,11 +729,9 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
     if base_norm in alias_map:
         aliases.update(alias_map[base_norm])
 
-    # Refuerzo general directo para preguntas unificadas
     if (file_type, question_num) in UNIFIED_EXTRA_ALIASES:
         aliases.update(UNIFIED_EXTRA_ALIASES[(file_type, question_num)])
 
-    # Estafas unificadas
     if (
         (file_type == "comunidad" and question_num == "23")
         or (file_type == "comercio" and question_num == "21")
@@ -736,7 +758,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "fraude_digital",
             })
 
-    # Comercio 20: asaltos
     if file_type == "comercio" and question_num == "20":
         if "persona" in base_norm:
             aliases.update({
@@ -797,9 +818,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
 
 
 def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text: str):
-    """
-    Permite fusionar categorías equivalentes para evitar duplicados visuales.
-    """
     base = normalize_token_for_compare(descriptor_text)
     label = normalize_display_for_grouping(descriptor_text)
     group_mode = "exact"
@@ -843,7 +861,16 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
         if ("transporte" in base) or ("bus" in base) or ("autobus" in base):
             return "Asalto a transporte público", "merged"
 
+    # Policial / Policía: gota a gota + evitar duplicados visuales
     if file_type in {"policial", "policia"}:
+        if (
+            "gota_a_gota" in base
+            or "prestamo_gota_a_gota" in base
+            or "prestamos_gota_a_gota" in base
+            or "cobro_gota_a_gota" in base
+            or "cobros_gota_a_gota" in base
+        ):
+            return "Préstamos gota a gota", "merged"
         return normalize_display_for_grouping(descriptor_text), "exact"
 
     return label, group_mode
@@ -857,7 +884,6 @@ def build_group_definitions(file_type: str, question_num: str, question_text: st
         for item in items:
             aliases.update(build_descriptor_aliases(file_type, question_num, item["descriptor_texto"]))
 
-        # Refuerzo fijo adicional por pregunta unificada
         aliases.update(UNIFIED_EXTRA_ALIASES.get((file_type, question_num), set()))
 
         return {
@@ -1097,8 +1123,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         matched_aliases_union = set()
         series = df_csv[question_col]
 
-        # Refuerzo general para todas las preguntas unificadas:
-        # agrega los tokens observados del CSV que correspondan a la bolsa conocida de esa pregunta.
         if not is_exact_question(file_type, preg_num):
             csv_tokens = set()
             for val in series:
@@ -1110,7 +1134,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 for _, group_info in group_defs.items():
                     group_info["aliases"].update(observed_unified)
 
-        # Refuerzo dinámico para comercio 20
         if file_type == "comercio" and preg_num == "20":
             csv_tokens = set()
             for val in series:
@@ -1132,7 +1155,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
 
                 group_info["aliases"].update(extra_matches)
 
-        # Refuerzo dinámico para prostitución en comunidad 12
         if file_type == "comunidad" and preg_num == "12":
             csv_tokens = set()
             for val in series:
@@ -1144,7 +1166,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                     extra_prostitucion = {tok for tok in csv_tokens if "prostit" in tok}
                     group_info["aliases"].update(extra_prostitucion)
 
-        # Refuerzo dinámico para extorsión en comercio 18
         if file_type == "comercio" and preg_num == "18":
             csv_tokens = set()
             for val in series:
@@ -1169,7 +1190,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                     }
                     group_info["aliases"].update(extra_extorsion)
 
-        # Refuerzo dinámico para comercio 19
         if file_type == "comercio" and preg_num == "19":
             csv_tokens = set()
             for val in series:
@@ -1190,7 +1210,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 }
                 group_info["aliases"].update(extra_drogas)
 
-        # Refuerzo dinámico para comercio/comunidad 13
         if preg_num == "13" and file_type in {"comunidad", "comercio"}:
             csv_tokens = set()
             for val in series:
@@ -1208,7 +1227,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 }
                 group_info["aliases"].update(extra_oferta)
 
-        # Refuerzo dinámico para comercio 14 / comunidad 15
         if (
             (file_type == "comercio" and preg_num == "14")
             or (file_type == "comunidad" and preg_num == "15")
@@ -1229,7 +1247,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 }
                 group_info["aliases"].update(extra_infra)
 
-        # Refuerzo dinámico para comercio 15
         if file_type == "comercio" and preg_num == "15":
             csv_tokens = set()
             for val in series:
@@ -1247,7 +1264,31 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 }
                 group_info["aliases"].update(extra_social)
 
-        # Refuerzo dinámico para estafa
+        # Policial: refuerzo dinámico para préstamos gota a gota
+        if file_type in {"policial", "policia"}:
+            csv_tokens = set()
+            for val in series:
+                csv_tokens.update(tokenize_cell_unique(val))
+
+            for group_label, group_info in group_defs.items():
+                desc_norm = normalize_token_for_compare(group_label)
+                if (
+                    "gota_a_gota" in desc_norm
+                    or "prestamo_gota_a_gota" in desc_norm
+                    or "prestamos_gota_a_gota" in desc_norm
+                ):
+                    extra_gota = {
+                        tok for tok in csv_tokens
+                        if (
+                            "gota_a_gota" in tok
+                            or "prestamo_gota_a_gota" in tok
+                            or "prestamos_gota_a_gota" in tok
+                            or "cobro_gota_a_gota" in tok
+                            or "cobros_gota_a_gota" in tok
+                        )
+                    }
+                    group_info["aliases"].update(extra_gota)
+
         if (
             (file_type == "comunidad" and preg_num == "23")
             or (file_type == "comercio" and preg_num == "21")
