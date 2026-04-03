@@ -80,6 +80,61 @@ UNIFIED_LABELS = {
     ("comercio", "21"): "Estafa",
 }
 
+# Refuerzos directos para preguntas unificadas:
+# cuentan igual si el valor viene solo, primero, en medio o al final.
+UNIFIED_EXTRA_ALIASES = {
+    ("comercio", "13"): {
+        "falta_de_oferta_educativa",
+        "falta_de_oferta_laboral",
+        "falta_de_oferta_recreativa",
+        "falta_de_actividades_culturales",
+    },
+    ("comunidad", "13"): {
+        "falta_de_oferta_educativa",
+        "falta_de_oferta_laboral",
+        "falta_de_oferta_recreativa",
+        "falta_de_actividades_culturales",
+    },
+    ("comercio", "14"): {
+        "calles_en_mal_estado",
+        "falta_de_iluminacion",
+        "falta_de_senalizacion",
+        "falta_o_deterioro_de_aceras",
+    },
+    ("comunidad", "15"): {
+        "calles_en_mal_estado",
+        "falta_de_iluminacion",
+        "falta_de_senalizacion",
+        "falta_o_deterioro_de_aceras",
+    },
+    ("comercio", "15"): {
+        "falta_de_programas_sociales",
+        "falta_de_espacios_de_integracion_social",
+        "falta_de_apoyo_institucional",
+        "falta_de_inversion_social",
+    },
+    ("comunidad", "16"): {
+        "calles_solas_u_oscuras",
+        "parques_o_lotes_abandonados",
+        "edificaciones_abandonadas",
+        "paradas_de_bus_inseguras",
+        "puentes_peatonales_inseguros",
+        "zonas_sin_vigilancia",
+    },
+    ("comercio", "19"): {
+        "en_via_publica",
+        "en_espacios_cerrados_casas_edificaciones_u_otros_inmuebles",
+        "de_forma_ocasional_o_movil_modalidad_expres_sin_punto_fijo",
+        "venta_de_drogas",
+    },
+    ("comunidad", "19"): {
+        "en_via_publica",
+        "en_espacios_cerrados_casas_edificaciones_u_otros_inmuebles",
+        "de_forma_ocasional_o_movil_modalidad_expres_sin_punto_fijo",
+        "venta_de_drogas",
+    },
+}
+
 # =========================================================
 # UTILIDADES DE TEXTO
 # =========================================================
@@ -566,56 +621,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "zona_donde_hay_prostitucion",
             "sitios_donde_se_ejerce_prostitucion",
         },
-        "zonas_donde_se_ejerce_prostitucion": {
-            "zona_donde_se_ejerce_prostitucion",
-            "zonas_donde_se_ejerce_prostitucion",
-            "zona_de_prostitucion",
-            "zonas_de_prostitucion",
-            "prostitucion",
-            "ejercicio_de_la_prostitucion",
-            "zona_donde_hay_prostitucion",
-            "sitios_donde_se_ejerce_prostitucion",
-        },
-        "zona_de_prostitucion": {
-            "zona_donde_se_ejerce_prostitucion",
-            "zonas_donde_se_ejerce_prostitucion",
-            "zona_de_prostitucion",
-            "zonas_de_prostitucion",
-            "prostitucion",
-            "ejercicio_de_la_prostitucion",
-            "zona_donde_hay_prostitucion",
-            "sitios_donde_se_ejerce_prostitucion",
-        },
-        "zonas_de_prostitucion": {
-            "zona_donde_se_ejerce_prostitucion",
-            "zonas_donde_se_ejerce_prostitucion",
-            "zona_de_prostitucion",
-            "zonas_de_prostitucion",
-            "prostitucion",
-            "ejercicio_de_la_prostitucion",
-            "zona_donde_hay_prostitucion",
-            "sitios_donde_se_ejerce_prostitucion",
-        },
-        "ejercicio_de_la_prostitucion": {
-            "zona_donde_se_ejerce_prostitucion",
-            "zonas_donde_se_ejerce_prostitucion",
-            "zona_de_prostitucion",
-            "zonas_de_prostitucion",
-            "prostitucion",
-            "ejercicio_de_la_prostitucion",
-            "zona_donde_hay_prostitucion",
-            "sitios_donde_se_ejerce_prostitucion",
-        },
-        "prostitucion": {
-            "zona_donde_se_ejerce_prostitucion",
-            "zonas_donde_se_ejerce_prostitucion",
-            "zona_de_prostitucion",
-            "zonas_de_prostitucion",
-            "prostitucion",
-            "ejercicio_de_la_prostitucion",
-            "zona_donde_hay_prostitucion",
-            "sitios_donde_se_ejerce_prostitucion",
-        },
 
         # Extorsión / Extorción en comercio 18
         "extorsion": {
@@ -657,6 +662,32 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "falta_de_actividades_culturales",
         },
 
+        # Infraestructura vial
+        "calles_en_mal_estado": {
+            "calles_en_mal_estado",
+            "falta_de_iluminacion",
+            "falta_de_senalizacion",
+            "falta_o_deterioro_de_aceras",
+        },
+        "falta_de_iluminacion": {
+            "calles_en_mal_estado",
+            "falta_de_iluminacion",
+            "falta_de_senalizacion",
+            "falta_o_deterioro_de_aceras",
+        },
+        "falta_de_senalizacion": {
+            "calles_en_mal_estado",
+            "falta_de_iluminacion",
+            "falta_de_senalizacion",
+            "falta_o_deterioro_de_aceras",
+        },
+        "falta_o_deterioro_de_aceras": {
+            "calles_en_mal_estado",
+            "falta_de_iluminacion",
+            "falta_de_senalizacion",
+            "falta_o_deterioro_de_aceras",
+        },
+
         "ventas_informales_ambulantes": {"ventas_informales_ambulantes"},
         "problemas_vecinales_o_conflictos_entre_vecinos": {"problemas_vecinales_o_conflictos_entre_vecinos"},
         "desvinculacion_escolar_desercion_escolar": {"desvinculacion_escolar_desercion_escolar"},
@@ -673,6 +704,10 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
 
     if base_norm in alias_map:
         aliases.update(alias_map[base_norm])
+
+    # Refuerzo general directo para preguntas unificadas
+    if (file_type, question_num) in UNIFIED_EXTRA_ALIASES:
+        aliases.update(UNIFIED_EXTRA_ALIASES[(file_type, question_num)])
 
     # Estafas unificadas
     if (
@@ -701,7 +736,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "fraude_digital",
             })
 
-    # Comercio 20: asaltos, refuerzo exacto
+    # Comercio 20: asaltos
     if file_type == "comercio" and question_num == "20":
         if "persona" in base_norm:
             aliases.update({
@@ -756,39 +791,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "robo_autobus",
             })
 
-    # Comercio 18: extorsión / extorción
-    if file_type == "comercio" and question_num == "18":
-        if ("extors" in base_norm) or ("extorc" in base_norm):
-            aliases.update({
-                "extorsion",
-                "extorcion",
-                "extorsiones",
-                "extorciones",
-                "cobro_ilegal",
-                "cobro_ilegal_a_comercios",
-                "exigencias_indebidas",
-                "exigencias_ilegales",
-                "intimidacion_para_exigir_cobro",
-                "amenazas_o_intimidacion_para_exigir_cobro_de_dinero_u_otros_beneficios_de_manera_ilegal_a_comercios",
-            })
-
-    # Comercio 19: venta de drogas
-    if file_type == "comercio" and question_num == "19":
-        if any(x in base_norm for x in [
-            "en_via_publica",
-            "espacios_cerrados",
-            "forma_ocasional",
-            "modalidad_expres",
-            "punto_fijo",
-            "venta_de_drogas"
-        ]):
-            aliases.update({
-                "en_via_publica",
-                "en_espacios_cerrados_casas_edificaciones_u_otros_inmuebles",
-                "de_forma_ocasional_o_movil_modalidad_expres_sin_punto_fijo",
-                "venta_de_drogas",
-            })
-
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
     aliases = {a for a in aliases if not is_unproductive_option(a)}
     return aliases
@@ -797,28 +799,21 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
 def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text: str):
     """
     Permite fusionar categorías equivalentes para evitar duplicados visuales.
-    group_mode:
-      - exact: cuenta tokens
-      - merged: cuenta por fila si cualquier alias equivalente aparece
     """
     base = normalize_token_for_compare(descriptor_text)
     label = normalize_display_for_grouping(descriptor_text)
     group_mode = "exact"
 
-    # Comunidad 12
     if file_type == "comunidad" and question_num == "12":
         if base in {"consumo_de_drogas", "consumo_de_drogas_en_espacios_publicos"}:
             return "Consumo de drogas", "merged"
-
         if base in {"contaminacion_sonica", "escandalos_musicales_o_ruidos_excesivos"}:
             return "Contaminación sónica", "merged"
-
         if base in {
             "carencia_o_inexistencia_de_alumbrado_publico",
             "deficiencias_en_el_alumbrado_publico"
         }:
             return "Carencia o inexistencia de alumbrado público", "merged"
-
         if base in {
             "zona_donde_se_ejerce_prostitucion",
             "zonas_donde_se_ejerce_prostitucion",
@@ -829,7 +824,6 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
         }:
             return "Zona donde se ejerce prostitución", "merged"
 
-    # Comercio 18: unificar extorsión / extorción
     if file_type == "comercio" and question_num == "18":
         if (
             "extors" in base
@@ -839,7 +833,6 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
         ):
             return "Extorsión (amenazas o intimidación para exigir cobro de dinero u otros beneficios de manera ilegal a comercios)", "merged"
 
-    # Comercio 20
     if file_type == "comercio" and question_num == "20":
         if ("persona" in base) or ("peaton" in base):
             return "Asalto a personas", "merged"
@@ -850,7 +843,6 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
         if ("transporte" in base) or ("bus" in base) or ("autobus" in base):
             return "Asalto a transporte público", "merged"
 
-    # Policial / Policía: evitar duplicados tipo Hurto y Hurto.
     if file_type in {"policial", "policia"}:
         return normalize_display_for_grouping(descriptor_text), "exact"
 
@@ -864,6 +856,9 @@ def build_group_definitions(file_type: str, question_num: str, question_text: st
 
         for item in items:
             aliases.update(build_descriptor_aliases(file_type, question_num, item["descriptor_texto"]))
+
+        # Refuerzo fijo adicional por pregunta unificada
+        aliases.update(UNIFIED_EXTRA_ALIASES.get((file_type, question_num), set()))
 
         return {
             unified_label: {
@@ -1102,6 +1097,19 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         matched_aliases_union = set()
         series = df_csv[question_col]
 
+        # Refuerzo general para todas las preguntas unificadas:
+        # agrega los tokens observados del CSV que correspondan a la bolsa conocida de esa pregunta.
+        if not is_exact_question(file_type, preg_num):
+            csv_tokens = set()
+            for val in series:
+                csv_tokens.update(tokenize_cell_unique(val))
+
+            known_unified = UNIFIED_EXTRA_ALIASES.get((file_type, preg_num), set())
+            if known_unified:
+                observed_unified = {tok for tok in csv_tokens if tok in known_unified}
+                for _, group_info in group_defs.items():
+                    group_info["aliases"].update(observed_unified)
+
         # Refuerzo dinámico para comercio 20
         if file_type == "comercio" and preg_num == "20":
             csv_tokens = set()
@@ -1132,12 +1140,8 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
 
             for group_label, group_info in group_defs.items():
                 desc_norm = normalize_token_for_compare(group_label)
-
                 if "prostit" in desc_norm:
-                    extra_prostitucion = {
-                        tok for tok in csv_tokens
-                        if "prostit" in tok
-                    }
+                    extra_prostitucion = {tok for tok in csv_tokens if "prostit" in tok}
                     group_info["aliases"].update(extra_prostitucion)
 
         # Refuerzo dinámico para extorsión en comercio 18
@@ -1171,44 +1175,79 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
             for val in series:
                 csv_tokens.update(tokenize_cell_unique(val))
 
-            for group_label, group_info in group_defs.items():
-                desc_norm = normalize_token_for_compare(group_label)
+            for _, group_info in group_defs.items():
+                extra_drogas = {
+                    tok for tok in csv_tokens
+                    if (
+                        tok == "en_via_publica"
+                        or tok == "en_espacios_cerrados_casas_edificaciones_u_otros_inmuebles"
+                        or tok == "de_forma_ocasional_o_movil_modalidad_expres_sin_punto_fijo"
+                        or tok == "venta_de_drogas"
+                        or "forma_ocasional" in tok
+                        or "espacios_cerrados" in tok
+                        or "via_publica" in tok
+                    )
+                }
+                group_info["aliases"].update(extra_drogas)
 
-                if normalize_token_for_compare(group_label) == "venta_de_drogas" or "venta_de_drogas" in desc_norm:
-                    extra_drogas = {
-                        tok for tok in csv_tokens
-                        if (
-                            tok == "en_via_publica"
-                            or tok == "en_espacios_cerrados_casas_edificaciones_u_otros_inmuebles"
-                            or tok == "de_forma_ocasional_o_movil_modalidad_expres_sin_punto_fijo"
-                            or tok == "venta_de_drogas"
-                            or "forma_ocasional" in tok
-                            or "espacios_cerrados" in tok
-                            or "via_publica" in tok
-                        )
-                    }
-                    group_info["aliases"].update(extra_drogas)
-
-        # Refuerzo dinámico para oferta de servicios y oportunidades
+        # Refuerzo dinámico para comercio/comunidad 13
         if preg_num == "13" and file_type in {"comunidad", "comercio"}:
             csv_tokens = set()
             for val in series:
                 csv_tokens.update(tokenize_cell_unique(val))
 
-            for group_label, group_info in group_defs.items():
-                if normalize_token_for_compare(group_label) == "oferta_de_servicios_y_oportunidades":
-                    extra_oferta = {
-                        tok for tok in csv_tokens
-                        if (
-                            "falta_de_oferta_educativa" in tok
-                            or "falta_de_oferta_laboral" in tok
-                            or "falta_de_oferta_recreativa" in tok
-                            or "falta_de_actividades_culturales" in tok
-                        )
-                    }
-                    group_info["aliases"].update(extra_oferta)
+            for _, group_info in group_defs.items():
+                extra_oferta = {
+                    tok for tok in csv_tokens
+                    if (
+                        tok == "falta_de_oferta_educativa"
+                        or tok == "falta_de_oferta_laboral"
+                        or tok == "falta_de_oferta_recreativa"
+                        or tok == "falta_de_actividades_culturales"
+                    )
+                }
+                group_info["aliases"].update(extra_oferta)
 
-        # Refuerzo dinámico para estafa unificada en comunidad 23 y comercio 21
+        # Refuerzo dinámico para comercio 14 / comunidad 15
+        if (
+            (file_type == "comercio" and preg_num == "14")
+            or (file_type == "comunidad" and preg_num == "15")
+        ):
+            csv_tokens = set()
+            for val in series:
+                csv_tokens.update(tokenize_cell_unique(val))
+
+            for _, group_info in group_defs.items():
+                extra_infra = {
+                    tok for tok in csv_tokens
+                    if (
+                        tok == "calles_en_mal_estado"
+                        or tok == "falta_de_iluminacion"
+                        or tok == "falta_de_senalizacion"
+                        or tok == "falta_o_deterioro_de_aceras"
+                    )
+                }
+                group_info["aliases"].update(extra_infra)
+
+        # Refuerzo dinámico para comercio 15
+        if file_type == "comercio" and preg_num == "15":
+            csv_tokens = set()
+            for val in series:
+                csv_tokens.update(tokenize_cell_unique(val))
+
+            for _, group_info in group_defs.items():
+                extra_social = {
+                    tok for tok in csv_tokens
+                    if (
+                        tok == "falta_de_programas_sociales"
+                        or tok == "falta_de_espacios_de_integracion_social"
+                        or tok == "falta_de_apoyo_institucional"
+                        or tok == "falta_de_inversion_social"
+                    )
+                }
+                group_info["aliases"].update(extra_social)
+
+        # Refuerzo dinámico para estafa
         if (
             (file_type == "comunidad" and preg_num == "23")
             or (file_type == "comercio" and preg_num == "21")
