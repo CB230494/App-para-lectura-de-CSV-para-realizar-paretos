@@ -2282,12 +2282,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
 # ==============================================================================
 # PARTE 9: RESÚMENES, FILTRADO DE CEROS Y FUNCIONES DE EXPORTACIÓN A EXCEL
 # ==============================================================================
-# Esta sección contiene las funciones que transforman los resultados brutos
-# en resúmenes agregados (por pregunta, totales globales por descriptor),
-# eliminan filas con conteo cero para limpiar la visualización, generan las
-# tablas de ranking para la interfaz y gestionan la exportación de múltiples
-# DataFrames a un solo archivo Excel con varias hojas.
-# ==============================================================================
 
 # =========================================================
 # RESÚMENES
@@ -2318,7 +2312,7 @@ def summarize_results(df_results: pd.DataFrame):
 
 
 def build_global_totals(df_results_all: pd.DataFrame) -> pd.DataFrame:
-    """Genera totales globales por descriptor (agregando todos los archivos)."""
+    """Genera totales globales por descriptor."""
 
     if df_results_all.empty:
         return pd.DataFrame()
@@ -2343,10 +2337,11 @@ def build_global_totals(df_results_all: pd.DataFrame) -> pd.DataFrame:
 
 
 def remove_zero_rows(df: pd.DataFrame, count_col: str):
-    """Elimina filas donde la columna de conteo tiene valor cero."""
+    """Elimina filas con conteo 0."""
 
     if df.empty or count_col not in df.columns:
         return df.copy()
+
     return df[df[count_col] > 0].copy()
 
 
@@ -2355,7 +2350,7 @@ def remove_zero_rows(df: pd.DataFrame, count_col: str):
 # =========================================================
 
 def to_excel_bytes(dfs: dict) -> bytes:
-    """Exporta múltiples DataFrames a un archivo Excel en memoria."""
+    """Exporta múltiples DataFrames a Excel."""
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -2365,11 +2360,11 @@ def to_excel_bytes(dfs: dict) -> bytes:
 
 
 # =========================================================
-# VISTA
+# VISTA (TABLAS CON COLOR AZUL + VERDE)
 # =========================================================
 
 def render_totals_tables(df: pd.DataFrame):
-    """Renderiza las tablas de totales por descriptor agrupadas por pregunta."""
+    """Renderiza las tablas con filas alternas en azul y verde."""
 
     if df.empty:
         st.info("No hay resultados con conteos mayores a 0 para los filtros seleccionados.")
@@ -2396,22 +2391,25 @@ def render_totals_tables(df: pd.DataFrame):
         ).reset_index(drop=True)
 
         show_df.insert(0, "Ranking", range(1, len(show_df) + 1))
+
         show_df = show_df.rename(columns={
             "descriptor": "Descriptor",
             "cantidad_respuestas": "Cantidad"
         })
 
+        # 🔥 COLORES AZUL + VERDE ALTERNOS
         def color_rows(row):
-             if row.name % 2 == 0:
-            return ["background-color: #1d3557"] * len(row)  # Azul oscuro
-              else:
-            return ["background-color: #2a9d8f"] * len(row)  # Verde suave
+            if row.name % 2 == 0:
+                return ["background-color: #1d3557"] * len(row)  # Azul oscuro
+            else:
+                return ["background-color: #2a9d8f"] * len(row)  # Verde institucional
 
         styled_df = (
             show_df.style
             .apply(color_rows, axis=1)
             .set_properties(**{
                 "color": "white",
+                "font-weight": "500",
                 "border-color": "#444444"
             })
         )
