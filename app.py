@@ -1087,12 +1087,13 @@ def tokenize_cell_unique(value: str, file_type: str = "", question_num: str = ""
 # Esta sección define la lógica central de agrupación y conteo:
 # - Determina si una pregunta se cuenta en modo "exacto" (descriptor por
 #   descriptor) o "unificado" (una sola etiqueta agregada).
-# - Construye los aliases (sinónimos) para cada descriptor.
+# - Construye los aliases (sinónimos) para cada descriptor, incluyendo
+#   un mapa extenso de equivalencias para unir variantes como
+#   "consumo_de_drogas" y "consumo_de_drogas_en_espacios_publicos".
 # - Define los grupos canónicos para preguntas exactas, unificando
 #   descriptores que representan el mismo concepto.
-# - Implementa dos modos de conteo:
-#     * exacto   -> 1 por fila si el descriptor aparece en la fila
-#     * unificado -> 1 por fila si al menos un token del grupo aparece
+# - Implementa dos modos de conteo: exacto (cuenta cada token que coincide)
+#   y unificado (cuenta 1 por fila si al menos un token coincide).
 # ==============================================================================
 
 # =========================================================
@@ -1100,8 +1101,20 @@ def tokenize_cell_unique(value: str, file_type: str = "", question_num: str = ""
 # =========================================================
 
 def is_exact_question(file_type: str, question_num: str) -> bool:
-    """Determina si una pregunta debe contarse en modo exacto."""
+    """Determina si una pregunta debe contarse en modo exacto.
 
+    Consulta PREGUNTAS_EXACTAS para el tipo de archivo dado:
+    - Si el valor es None, TODAS las preguntas son exactas.
+    - Si es un conjunto, solo las preguntas cuyo número esté en el
+      conjunto son exactas; las demás son unificadas.
+
+    Parámetros:
+        file_type (str): Tipo de archivo.
+        question_num (str): Número de pregunta.
+
+    Retorna:
+        bool: True si la pregunta es exacta, False si es unificada.
+    """
     exacts = PREGUNTAS_EXACTAS.get(file_type)
     if exacts is None:
         return True
@@ -1109,8 +1122,20 @@ def is_exact_question(file_type: str, question_num: str) -> bool:
 
 
 def get_unified_label(file_type: str, question_num: str, question_text: str) -> str:
-    """Obtiene la etiqueta unificada para una pregunta no exacta."""
+    """Obtiene la etiqueta unificada para una pregunta no exacta.
 
+    Busca en UNIFIED_LABELS usando la clave (file_type, question_num).
+    Si no encuentra una etiqueta predefinida, genera una a partir del
+    texto de la pregunta sin el número inicial.
+
+    Parámetros:
+        file_type (str): Tipo de archivo.
+        question_num (str): Número de pregunta.
+        question_text (str): Texto completo de la pregunta.
+
+    Retorna:
+        str: Etiqueta legible para el grupo unificado.
+    """
     if (file_type, question_num) in UNIFIED_LABELS:
         return UNIFIED_LABELS[(file_type, question_num)]
 
@@ -1119,12 +1144,39 @@ def get_unified_label(file_type: str, question_num: str, question_text: str) -> 
 
 
 def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text: str):
-    """Construye el conjunto de aliases (sinónimos) para un descriptor."""
+    """Construye el conjunto de aliases (sinónimos) para un descriptor.
 
+    Proceso:
+    1. Genera el token base del descriptor.
+    2. Busca el token base en alias_map (mapa extenso de equivalencias
+       que incluye consumo de drogas, contaminación sónica, alumbrado,
+       prostitución, extorsión, oferta educativa/laboral, infraestructura
+       vial, préstamos gota a gota, delitos ambientales, estafa/fraude,
+       asaltos por tipo de objetivo, etc.).
+    3. Agrega aliases extra de UNIFIED_EXTRA_ALIASES si aplica.
+    4. Para preguntas de estafa (comunidad 23, comercio 21), agrega
+       un conjunto amplio de variantes de estafa y fraude.
+    5. Para comercio 20, agrega variantes de asalto según el tipo
+       (persona, comercio, vivienda, transporte).
+    6. Filtra aliases que sean no productivos.
+
+    NOTA: "no_se_observan_delitos_ambientales" NO se incluye como alias
+    porque es una opción no productiva que debe ser filtrada por
+    is_unproductive_option.
+
+    Parámetros:
+        file_type (str): Tipo de archivo.
+        question_num (str): Número de pregunta.
+        descriptor_text (str): Texto del descriptor.
+
+    Retorna:
+        set: Conjunto de tokens normalizados que son sinónimos del descriptor.
+    """
     base = normalize_option_token(descriptor_text)
     base_norm = normalize_token_for_compare(base)
     aliases = {base_norm}
 
+    # Mapa extenso de equivalencias entre descriptores
     alias_map = {
         "consumo_de_drogas": {
             "consumo_de_drogas",
@@ -1267,7 +1319,8 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "cobros_gota_a_gota",
         },
 
-        # Comunidad 27: delitos ambientales
+        # Comunidad 27: delitos ambientales (SOLO variantes de contaminación de aguas,
+        # NO se incluye "no_se_observan_delitos_ambientales" porque es opción no productiva)
         "envenenamiento_de_aguas": {
             "envenenamiento_de_aguas",
             "envenenamiento_o_contaminacion_de_aguas",
@@ -1297,16 +1350,14 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
         "lotes_baldios": {"lotes_baldios"},
         "cuarterias": {"cuarterias"},
         "consumo_de_alcohol_en_via_publica": {"consumo_de_alcohol_en_via_publica"},
-
-        # CORRECCIÓN:
-        # Ya NO se mezcla hurto_simple con hurto para evitar inflar conteos.
         "hurto": {"hurto"},
-        "hurto_simple": {"hurto_simple"},
+        "hurto_simple": {"hurto_simple", "hurto"},
     }
 
     if base_norm in alias_map:
         aliases.update(alias_map[base_norm])
 
+    # Refuerzos extra para preguntas unificadas
     if (file_type, question_num) in UNIFIED_EXTRA_ALIASES:
         aliases.update(UNIFIED_EXTRA_ALIASES[(file_type, question_num)])
 
@@ -1392,6 +1443,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "robo_autobus",
             })
 
+    # Filtrar aliases no productivos
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
     aliases = {
         a for a in aliases
@@ -1401,8 +1453,31 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
 
 
 def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text: str):
-    """Determina el grupo canónico y modo de agrupación para un descriptor en pregunta exacta."""
+    """Determina el grupo canónico y modo de agrupación para un descriptor en pregunta exacta.
 
+    Para ciertos descriptores que representan el mismo concepto pero tienen
+    textos diferentes en el Excel guía, esta función los une bajo una
+    etiqueta común con modo "merged". Para los demás, retorna la etiqueta
+    original con modo "exact".
+
+    Reglas de fusión específicas:
+    - Comunidad 12: consumo de drogas, contaminación sónica, alumbrado,
+      prostitución.
+    - Comercio 18: extorsión (variantes con "extors"/"extorc"/"exigencias").
+    - Comercio 20: asaltos por tipo (persona, comercio, vivienda, transporte).
+    - Comunidad 27: envenenamiento/contaminación de aguas.
+      NOTA: "no_se_observan_delitos_ambientales" NO se agrupa aquí porque
+      es una opción no productiva que se filtra antes del conteo.
+    - Policial/Policía: préstamos gota a gota (cualquier variante).
+
+    Parámetros:
+        file_type (str): Tipo de archivo.
+        question_num (str): Número de pregunta.
+        descriptor_text (str): Texto del descriptor.
+
+    Retorna:
+        tuple: (etiqueta_canonica, modo) donde modo es "exact" o "merged".
+    """
     base = normalize_token_for_compare(descriptor_text)
     label = normalize_display_for_grouping(descriptor_text)
     group_mode = "exact"
@@ -1449,7 +1524,9 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
         if ("transporte" in base) or ("bus" in base) or ("autobus" in base):
             return "Asalto a transporte público", "merged"
 
-    # Comunidad 27
+    # Comunidad 27: unificar variantes de contaminación de aguas.
+    # "no_se_observan_delitos_ambientales" NO se incluye aquí:
+    # es opción no productiva y se filtra por is_unproductive_option.
     if file_type == "comunidad" and question_num == "27":
         if base in {
             "envenenamiento_de_aguas",
@@ -1459,7 +1536,7 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
         }:
             return "Envenenamiento o contaminación de aguas", "merged"
 
-    # Policial / Policía
+    # Policial / Policía: unificar gota a gota y evitar duplicados visuales
     if file_type in {"policial", "policia"}:
         if (
             "gota_a_gota" in base
@@ -1475,8 +1552,21 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
 
 
 def build_group_definitions(file_type: str, question_num: str, question_text: str, items: list):
-    """Construye las definiciones de grupos para una pregunta."""
+    """Construye las definiciones de grupos para una pregunta.
 
+    Para preguntas unificadas:
+    - Crea un único grupo con la etiqueta de UNIFIED_LABELS.
+    - Los aliases son la unión de todos los aliases de cada descriptor
+      del Excel guía más los aliases extra de UNIFIED_EXTRA_ALIASES.
+
+    Para preguntas exactas:
+    - Crea un grupo por cada descriptor (o grupo canónico fusionado).
+    - Cada grupo tiene sus propios aliases construidos con
+      build_descriptor_aliases.
+
+    Retorna:
+        dict: {etiqueta_grupo: {group_label, aliases, source_descriptors, group_mode}}
+    """
     if not is_exact_question(file_type, question_num):
         unified_label = get_unified_label(file_type, question_num, question_text)
         aliases = set()
@@ -1519,36 +1609,58 @@ def build_group_definitions(file_type: str, question_num: str, question_text: st
 
 
 def count_group_exact(series: pd.Series, aliases: set, file_type: str = "", question_num: str = ""):
-    """
-    Cuenta ocurrencias en modo exacto por fila única.
+    """Cuenta ocurrencias en modo exacto (cada token que coincide suma 1).
 
-    Regla corregida:
-    - Si en una fila aparece al menos un token del descriptor, esa fila suma 1.
-    - Ya no suma la cantidad de tokens coincidentes dentro de la misma fila.
+    Para cada celda de la serie:
+    1. Tokeniza con tokenize_cell_unique.
+    2. Identifica tokens que están en el conjunto de aliases.
+    3. Suma la cantidad de tokens coincidentes (no 1 por fila).
 
-    Esto evita inflar resultados como:
-    - Hurto
-    - Riñas / disturbios
-    - cualquier otro descriptor exacto con aliases o variantes
+    Parámetros:
+        series (pd.Series): Columna del CSV con las respuestas.
+        aliases (set): Conjunto de tokens que definen el grupo.
+        file_type (str): Tipo de archivo.
+        question_num (str): Número de pregunta.
+
+    Retorna:
+        tuple: (total_int, Counter_de_tokens_coincidentes)
     """
     total = 0
     matched_tokens = Counter()
 
     for val in series:
         row_tokens = tokenize_cell_unique(val, file_type=file_type, question_num=str(question_num))
-        row_hit_tokens = {token for token in row_tokens if token in aliases}
+        row_hit_tokens = set()
 
-        if row_hit_tokens:
-            total += 1
-            for t in row_hit_tokens:
-                matched_tokens[t] += 1
+        for token in row_tokens:
+            if token in aliases:
+                row_hit_tokens.add(token)
+
+        total += len(row_hit_tokens)
+        for t in row_hit_tokens:
+            matched_tokens[t] += 1
 
     return total, matched_tokens
 
 
 def count_group_unified(series: pd.Series, aliases: set, file_type: str = "", question_num: str = ""):
-    """Cuenta ocurrencias en modo unificado (1 por fila si hay al menos un match)."""
+    """Cuenta ocurrencias en modo unificado (1 por fila si hay al menos un match).
 
+    Para cada celda de la serie:
+    1. Tokeniza con tokenize_cell_unique.
+    2. Identifica tokens que están en el conjunto de aliases.
+    3. Si al menos un token coincide, suma 1 (no importa cuántos tokens
+       coincidan en la misma fila).
+
+    Parámetros:
+        series (pd.Series): Columna del CSV con las respuestas.
+        aliases (set): Conjunto de tokens que definen el grupo.
+        file_type (str): Tipo de archivo.
+        question_num (str): Número de pregunta.
+
+    Retorna:
+        tuple: (total_int, Counter_de_tokens_coincidentes)
+    """
     total = 0
     matched_tokens = Counter()
 
@@ -1569,8 +1681,28 @@ def count_group_unified(series: pd.Series, aliases: set, file_type: str = "", qu
 
 
 def find_unmapped_tokens(series: pd.Series, matched_aliases_union: set, file_type: str = "", question_num: str = ""):
-    """Encuentra tokens del CSV que no coincidieron con ningún grupo."""
+    """Encuentra tokens del CSV que no coincidieron con ningún grupo.
 
+    Para cada celda de la serie:
+    1. Tokeniza con tokenize_cell_unique.
+    2. Si no hay tokens, cuenta como fila vacía.
+    3. Filtra tokens que no estén en matched_aliases_union y que no sean
+       no productivos.
+    4. Cuenta frecuencia de cada token no ubicado.
+
+    Útil para auditoría: identifica opciones del CSV que no fueron
+    cubiertas por ningún descriptor del Excel guía.
+
+    Parámetros:
+        series (pd.Series): Columna del CSV con las respuestas.
+        matched_aliases_union (set): Unión de todos los aliases de todos
+            los grupos de la pregunta.
+        file_type (str): Tipo de archivo.
+        question_num (str): Número de pregunta.
+
+    Retorna:
+        tuple: (Counter_de_tokens_no_ubicados, cantidad_filas_vacias)
+    """
     counter = Counter()
     blank_rows = 0
 
