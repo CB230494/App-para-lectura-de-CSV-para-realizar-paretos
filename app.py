@@ -2293,136 +2293,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
 # RESÚMENES
 # =========================================================
 
-def summarize_results(df_results: pd.DataFrame):
-    """Genera un resumen de conteos agrupado por archivo, tipo y pregunta.
-
-    Agrupa df_results por (archivo, tipo, pregunta_num, pregunta, modo_conteo)
-    y suma la cantidad de respuestas. Ordena por archivo y número de pregunta
-    usando question_sort_key para ordenamiento numérico correcto.
-
-    Parámetros:
-        df_results (pd.DataFrame): DataFrame de resultados detallados.
-
-    Retorna:
-        pd.DataFrame: Resumen agregado, o DataFrame vacío si no hay datos.
-    """
-    if df_results.empty:
-        return pd.DataFrame()
-
-    summary = (
-        df_results
-        .groupby(
-            ["archivo", "tipo", "pregunta_num", "pregunta", "modo_conteo"],
-            as_index=False
-        )["cantidad_respuestas"]
-        .sum()
-    )
-
-    summary["sort_key"] = summary["pregunta_num"].apply(question_sort_key)
-    summary = summary.sort_values(
-        by=["archivo", "sort_key", "pregunta"],
-        kind="stable"
-    ).drop(columns=["sort_key"])
-
-    return summary
-
-
-def build_global_totals(df_results_all: pd.DataFrame) -> pd.DataFrame:
-    """Genera totales globales por descriptor (agregando todos los archivos).
-
-    Agrupa df_results_all por (tipo, pregunta_num, pregunta, descriptor,
-    modo_conteo) y suma las cantidades. Ordena por tipo, número de pregunta
-    y cantidad descendente (para efecto Pareto), con desempate alfabético
-    por descriptor.
-
-    Parámetros:
-        df_results_all (pd.DataFrame): DataFrame de resultados de todos los archivos.
-
-    Retorna:
-        pd.DataFrame: Totales globales ordenados, o DataFrame vacío.
-    """
-    if df_results_all.empty:
-        return pd.DataFrame()
-
-    totals = (
-        df_results_all
-        .groupby(
-            ["tipo", "pregunta_num", "pregunta", "descriptor", "modo_conteo"],
-            as_index=False
-        )["cantidad_respuestas"]
-        .sum()
-    )
-
-    totals["sort_key"] = totals["pregunta_num"].apply(question_sort_key)
-    totals = totals.sort_values(
-        by=["tipo", "sort_key", "cantidad_respuestas", "descriptor"],
-        ascending=[True, True, False, True],
-        kind="stable"
-    ).drop(columns=["sort_key"])
-
-    return totals
-
-
-def remove_zero_rows(df: pd.DataFrame, count_col: str):
-    """Elimina filas donde la columna de conteo tiene valor cero.
-
-    Si el DataFrame está vacío o no contiene la columna especificada,
-    retorna una copia del DataFrame original sin cambios.
-
-    Parámetros:
-        df (pd.DataFrame): DataFrame a filtrar.
-        count_col (str): Nombre de la columna numérica de conteo.
-
-    Retorna:
-        pd.DataFrame: DataFrame sin filas con conteo cero.
-    """
-    if df.empty or count_col not in df.columns:
-        return df.copy()
-    return df[df[count_col] > 0].copy()
-
-
-# =========================================================
-# EXPORTAR
-# =========================================================
-
-def to_excel_bytes(dfs: dict) -> bytes:
-    """Exporta múltiples DataFrames a un archivo Excel en memoria.
-
-    Cada clave del diccionario se convierte en el nombre de una hoja
-    (truncado a 31 caracteres, límite de Excel). Los DataFrames se
-    escriben sin índice.
-
-    Parámetros:
-        dfs (dict): Diccionario {nombre_hoja: DataFrame}.
-
-    Retorna:
-        bytes: Contenido del archivo Excel en formato XLSX.
-    """
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for sheet_name, df in dfs.items():
-            df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-    return output.getvalue()
-
-
-# =========================================================
-# VISTA
-# =========================================================
-
 def render_totals_tables(df: pd.DataFrame):
-    """Renderiza las tablas de totales por descriptor agrupadas por pregunta.
-
-    Para cada grupo (tipo, pregunta_num, pregunta, modo_conteo):
-    1. Muestra encabezado con número, tipo, modo y texto de pregunta.
-    2. Crea una subtabla con columnas: Ranking, Descriptor, Cantidad.
-    3. Ordena por cantidad descendente y asigna ranking consecutivo.
-    4. Muestra con st.table y un separador st.divider().
-
-    Si el DataFrame está vacío, muestra un mensaje informativo.
-
-    Parámetros:
-        df (pd.DataFrame): DataFrame de totales globales filtrado.
-    """
     if df.empty:
         st.info("No hay resultados con conteos mayores a 0 para los filtros seleccionados.")
         return
@@ -2446,13 +2317,23 @@ def render_totals_tables(df: pd.DataFrame):
             by=["cantidad_respuestas", "descriptor"],
             ascending=[False, True]
         ).reset_index(drop=True)
+
         show_df.insert(0, "Ranking", range(1, len(show_df) + 1))
         show_df = show_df.rename(columns={
             "descriptor": "Descriptor",
             "cantidad_respuestas": "Cantidad"
         })
 
-        st.table(show_df)
+        # 🔥 AQUI ESTA EL CAMBIO VISUAL (FILAS ALTERNAS)
+        def color_rows(row):
+            if row.name % 2 == 0:
+                return ["background-color: #1e1e1e"] * len(row)  # gris oscuro
+            else:
+                return ["background-color: #2a2a2a"] * len(row)  # gris claro
+
+        styled_df = show_df.style.apply(color_rows, axis=1)
+
+        st.dataframe(styled_df, use_container_width=True)
         st.divider()
         # ==============================================================================
 # PARTE 10: INTERFAZ DE USUARIO PRINCIPAL CON STREAMLIT (SIDEBAR, CARGA DE
