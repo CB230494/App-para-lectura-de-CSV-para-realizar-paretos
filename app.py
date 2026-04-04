@@ -1152,13 +1152,15 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
        que incluye consumo de drogas, contaminación sónica, alumbrado,
        prostitución, extorsión, oferta educativa/laboral, infraestructura
        vial, préstamos gota a gota, delitos ambientales, estafa/fraude,
-       asaltos por tipo de objetivo, etc.).
+       asaltos por tipo de objetivo, y robo de vehículos en comunidad 24).
     3. Agrega aliases extra de UNIFIED_EXTRA_ALIASES si aplica.
     4. Para preguntas de estafa (comunidad 23, comercio 21), agrega
        un conjunto amplio de variantes de estafa y fraude.
     5. Para comercio 20, agrega variantes de asalto según el tipo
        (persona, comercio, vivienda, transporte).
-    6. Filtra aliases que sean no productivos.
+    6. Para comunidad 24, agrega variantes robustas de robo de vehículos
+       completos y mantiene aparte la modalidad tacha.
+    7. Filtra aliases que sean no productivos.
 
     NOTA: "no_se_observan_delitos_ambientales" NO se incluye como alias
     porque es una opción no productiva que debe ser filtrada por
@@ -1319,8 +1321,7 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "cobros_gota_a_gota",
         },
 
-        # Comunidad 27: delitos ambientales (SOLO variantes de contaminación de aguas,
-        # NO se incluye "no_se_observan_delitos_ambientales" porque es opción no productiva)
+        # Comunidad 27: delitos ambientales
         "envenenamiento_de_aguas": {
             "envenenamiento_de_aguas",
             "envenenamiento_o_contaminacion_de_aguas",
@@ -1338,6 +1339,69 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "envenenamiento_o_contaminacion_de_aguas",
             "contaminacion_de_aguas",
             "contaminacion_o_envenenamiento_de_aguas",
+        },
+
+        # Comunidad 24: robo de vehículos completos
+        "robo_de_vehiculos_completos_carros_motocicletas": {
+            "robo_de_vehiculos_completos_carros_motocicletas",
+            "robo_de_vehiculos_completos",
+            "robo_de_vehiculo_completo",
+            "robo_de_vehiculos",
+            "robo_de_vehiculo",
+            "robo_a_vehiculos",
+            "robo_a_vehiculo",
+            "robo_de_carros",
+            "robo_de_carro",
+            "robo_de_motocicletas",
+            "robo_de_motocicleta",
+            "robo_de_carros_y_motocicletas",
+            "robo_de_vehiculos_carros_motocicletas",
+            "sustraccion_de_vehiculos",
+            "sustraccion_de_vehiculo",
+        },
+        "robo_de_vehiculos_completos": {
+            "robo_de_vehiculos_completos_carros_motocicletas",
+            "robo_de_vehiculos_completos",
+            "robo_de_vehiculo_completo",
+            "robo_de_vehiculos",
+            "robo_de_vehiculo",
+            "robo_a_vehiculos",
+            "robo_a_vehiculo",
+            "robo_de_carros",
+            "robo_de_carro",
+            "robo_de_motocicletas",
+            "robo_de_motocicleta",
+            "robo_de_carros_y_motocicletas",
+            "robo_de_vehiculos_carros_motocicletas",
+            "sustraccion_de_vehiculos",
+            "sustraccion_de_vehiculo",
+        },
+        "robo_a_vehiculos": {
+            "robo_de_vehiculos_completos_carros_motocicletas",
+            "robo_de_vehiculos_completos",
+            "robo_de_vehiculo_completo",
+            "robo_de_vehiculos",
+            "robo_de_vehiculo",
+            "robo_a_vehiculos",
+            "robo_a_vehiculo",
+            "robo_de_carros",
+            "robo_de_carro",
+            "robo_de_motocicletas",
+            "robo_de_motocicleta",
+            "robo_de_carros_y_motocicletas",
+            "robo_de_vehiculos_carros_motocicletas",
+            "sustraccion_de_vehiculos",
+            "sustraccion_de_vehiculo",
+        },
+
+        # Comunidad 24: tacha, separada del robo completo
+        "robo_a_vehiculos_tacha": {
+            "robo_a_vehiculos_tacha",
+            "robo_de_vehiculos_tacha",
+            "tacha",
+            "tacha_a_vehiculos",
+            "robo_por_tacha",
+            "robo_en_vehiculos",
         },
 
         "ventas_informales_ambulantes": {"ventas_informales_ambulantes"},
@@ -1443,6 +1507,41 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
                 "robo_autobus",
             })
 
+    # Comunidad 24: ampliar aliases según tipo de robo a vehículo
+    if file_type == "comunidad" and question_num == "24":
+        if (
+            "vehiculos_completos" in base_norm
+            or "robo_de_vehiculos" in base_norm
+            or "robo_a_vehiculos" in base_norm
+        ) and "tacha" not in base_norm:
+            aliases.update({
+                "robo_de_vehiculos_completos_carros_motocicletas",
+                "robo_de_vehiculos_completos",
+                "robo_de_vehiculo_completo",
+                "robo_de_vehiculos",
+                "robo_de_vehiculo",
+                "robo_a_vehiculos",
+                "robo_a_vehiculo",
+                "robo_de_carros",
+                "robo_de_carro",
+                "robo_de_motocicletas",
+                "robo_de_motocicleta",
+                "robo_de_carros_y_motocicletas",
+                "robo_de_vehiculos_carros_motocicletas",
+                "sustraccion_de_vehiculos",
+                "sustraccion_de_vehiculo",
+            })
+
+        if "tacha" in base_norm:
+            aliases.update({
+                "robo_a_vehiculos_tacha",
+                "robo_de_vehiculos_tacha",
+                "tacha",
+                "tacha_a_vehiculos",
+                "robo_por_tacha",
+                "robo_en_vehiculos",
+            })
+
     # Filtrar aliases no productivos
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
     aliases = {
@@ -1465,9 +1564,8 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
       prostitución.
     - Comercio 18: extorsión (variantes con "extors"/"extorc"/"exigencias").
     - Comercio 20: asaltos por tipo (persona, comercio, vivienda, transporte).
+    - Comunidad 24: roba de vehículos completos se unifica, tacha queda aparte.
     - Comunidad 27: envenenamiento/contaminación de aguas.
-      NOTA: "no_se_observan_delitos_ambientales" NO se agrupa aquí porque
-      es una opción no productiva que se filtra antes del conteo.
     - Policial/Policía: préstamos gota a gota (cualquier variante).
 
     Parámetros:
@@ -1524,9 +1622,29 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
         if ("transporte" in base) or ("bus" in base) or ("autobus" in base):
             return "Asalto a transporte público", "merged"
 
-    # Comunidad 27: unificar variantes de contaminación de aguas.
-    # "no_se_observan_delitos_ambientales" NO se incluye aquí:
-    # es opción no productiva y se filtra por is_unproductive_option.
+    # Comunidad 24: fusionar robo de vehículos completos y dejar tacha aparte
+    if file_type == "comunidad" and question_num == "24":
+        if "tacha" in base:
+            return "Robo a vehículos (tacha)", "merged"
+
+        if (
+            "vehiculos_completos" in base
+            or base in {
+                "robo_de_vehiculos",
+                "robo_de_vehiculo",
+                "robo_a_vehiculos",
+                "robo_a_vehiculo",
+                "robo_de_carros",
+                "robo_de_carro",
+                "robo_de_motocicletas",
+                "robo_de_motocicleta",
+                "sustraccion_de_vehiculos",
+                "sustraccion_de_vehiculo",
+            }
+        ):
+            return "Robo de vehículos completos (carros / motocicletas)", "merged"
+
+    # Comunidad 27: unificar variantes de contaminación de aguas
     if file_type == "comunidad" and question_num == "27":
         if base in {
             "envenenamiento_de_aguas",
