@@ -2279,7 +2279,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
     df_results = apply_special_cross_question_rules(df_results)
 
     return df_results, df_mapping, df_unmapped
-    # ==============================================================================
+# ==============================================================================
 # PARTE 9: RESÚMENES, FILTRADO DE CEROS Y FUNCIONES DE EXPORTACIÓN A EXCEL
 # ==============================================================================
 # Esta sección contiene las funciones que transforman los resultados brutos
@@ -2293,7 +2293,84 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
 # RESÚMENES
 # =========================================================
 
+def summarize_results(df_results: pd.DataFrame):
+    """Genera un resumen de conteos agrupado por archivo, tipo y pregunta."""
+
+    if df_results.empty:
+        return pd.DataFrame()
+
+    summary = (
+        df_results
+        .groupby(
+            ["archivo", "tipo", "pregunta_num", "pregunta", "modo_conteo"],
+            as_index=False
+        )["cantidad_respuestas"]
+        .sum()
+    )
+
+    summary["sort_key"] = summary["pregunta_num"].apply(question_sort_key)
+    summary = summary.sort_values(
+        by=["archivo", "sort_key", "pregunta"],
+        kind="stable"
+    ).drop(columns=["sort_key"])
+
+    return summary
+
+
+def build_global_totals(df_results_all: pd.DataFrame) -> pd.DataFrame:
+    """Genera totales globales por descriptor (agregando todos los archivos)."""
+
+    if df_results_all.empty:
+        return pd.DataFrame()
+
+    totals = (
+        df_results_all
+        .groupby(
+            ["tipo", "pregunta_num", "pregunta", "descriptor", "modo_conteo"],
+            as_index=False
+        )["cantidad_respuestas"]
+        .sum()
+    )
+
+    totals["sort_key"] = totals["pregunta_num"].apply(question_sort_key)
+    totals = totals.sort_values(
+        by=["tipo", "sort_key", "cantidad_respuestas", "descriptor"],
+        ascending=[True, True, False, True],
+        kind="stable"
+    ).drop(columns=["sort_key"])
+
+    return totals
+
+
+def remove_zero_rows(df: pd.DataFrame, count_col: str):
+    """Elimina filas donde la columna de conteo tiene valor cero."""
+
+    if df.empty or count_col not in df.columns:
+        return df.copy()
+    return df[df[count_col] > 0].copy()
+
+
+# =========================================================
+# EXPORTAR
+# =========================================================
+
+def to_excel_bytes(dfs: dict) -> bytes:
+    """Exporta múltiples DataFrames a un archivo Excel en memoria."""
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        for sheet_name, df in dfs.items():
+            df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+    return output.getvalue()
+
+
+# =========================================================
+# VISTA
+# =========================================================
+
 def render_totals_tables(df: pd.DataFrame):
+    """Renderiza las tablas de totales por descriptor agrupadas por pregunta."""
+
     if df.empty:
         st.info("No hay resultados con conteos mayores a 0 para los filtros seleccionados.")
         return
@@ -2324,16 +2401,21 @@ def render_totals_tables(df: pd.DataFrame):
             "cantidad_respuestas": "Cantidad"
         })
 
-        # 🔥 AQUI ESTA EL CAMBIO VISUAL (FILAS ALTERNAS)
         def color_rows(row):
             if row.name % 2 == 0:
-                return ["background-color: #1e1e1e"] * len(row)  # gris oscuro
-            else:
-                return ["background-color: #2a2a2a"] * len(row)  # gris claro
+                return ["background-color: #1e1e1e"] * len(row)
+            return ["background-color: #2a2a2a"] * len(row)
 
-        styled_df = show_df.style.apply(color_rows, axis=1)
+        styled_df = (
+            show_df.style
+            .apply(color_rows, axis=1)
+            .set_properties(**{
+                "color": "white",
+                "border-color": "#444444"
+            })
+        )
 
-        st.dataframe(styled_df, use_container_width=True)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
         st.divider()
         # ==============================================================================
 # PARTE 10: INTERFAZ DE USUARIO PRINCIPAL CON STREAMLIT (SIDEBAR, CARGA DE
