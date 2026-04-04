@@ -832,7 +832,7 @@ def flatten_headers(df: pd.DataFrame) -> pd.DataFrame:
         new_cols.append(s)
     df.columns = new_cols
     return df
-    # ==============================================================================
+# ==============================================================================
 # PARTE 6: UBICACIÓN DE PREGUNTAS EN EL CSV Y EXTRACCIÓN DE RESPUESTAS DE CELDAS
 # ==============================================================================
 # Esta sección aborda dos problemas centrales:
@@ -1002,28 +1002,6 @@ def split_multiselect_cell(value: str):
     return parts
 
 
-def is_q27_no_observa_ambiental(token_norm: str, file_type: str = "", question_num: str = "") -> bool:
-    """Identifica la excepción especial de "no se observan delitos ambientales".
-
-    En la pregunta 27 de comunidad, la opción "no_se_observan_delitos_ambientales"
-    NO se considera no productiva (a diferencia de otras opciones "no se observa").
-    Esta función retorna True solo para ese caso específico.
-
-    Parámetros:
-        token_norm (str): Token normalizado de la opción.
-        file_type (str): Tipo de archivo.
-        question_num (str): Número de pregunta.
-
-    Retorna:
-        bool: True si es la excepción de pregunta 27 comunidad.
-    """
-    return (
-        file_type == "comunidad"
-        and str(question_num) == "27"
-        and token_norm == "no_se_observan_delitos_ambientales"
-    )
-
-
 def is_no_observa_option(token_norm: str) -> bool:
     """Determina si un token representa una opción de "no se observa".
 
@@ -1046,23 +1024,24 @@ def is_unproductive_option(token_norm: str, file_type: str = "", question_num: s
     """Determina si un token es no productivo (debe excluirse del conteo).
 
     Criterios de exclusión (en orden):
-    1. Si es la excepción de pregunta 27 comunidad -> NO es no productivo.
-    2. Si está en OPCIONES_NO_PRODUCTIVAS -> sí es no productivo.
-    3. Si comienza con "otro_" o "otros_" -> sí es no productivo.
-    4. Si contiene un patrón de PATRONES_NO_OBSERVA -> sí es no productivo.
-    5. En caso contrario -> no es no productivo.
+    1. Si está en OPCIONES_NO_PRODUCTIVAS -> sí es no productivo.
+    2. Si comienza con "otro_" o "otros_" -> sí es no productivo.
+    3. Si contiene un patrón de PATRONES_NO_OBSERVA -> sí es no productivo.
+       Esto aplica para TODAS las preguntas sin excepción, incluyendo
+       "no_se_observan_delitos_ambientales" en comunidad 27.
+    4. En caso contrario -> no es no productivo.
 
     Parámetros:
         token_norm (str): Token normalizado.
-        file_type (str): Tipo de archivo (para la excepción de P27).
-        question_num (str): Número de pregunta (para la excepción de P27).
+        file_type (str): Tipo de archivo (se conserva por compatibilidad
+                         de firma, pero ya no se usa para excepciones).
+        question_num (str): Número de pregunta (se conserva por
+                            compatibilidad de firma, pero ya no se usa
+                            para excepciones).
 
     Retorna:
         bool: True si el token debe excluirse del conteo.
     """
-    if is_q27_no_observa_ambiental(token_norm, file_type, question_num):
-        return False
-
     if token_norm in OPCIONES_NO_PRODUCTIVAS:
         return True
     if token_norm.startswith("otro_") or token_norm.startswith("otros_"):
@@ -1102,7 +1081,7 @@ def tokenize_cell_unique(value: str, file_type: str = "", question_num: str = ""
         tokens.append(token)
 
     return sorted(set(tokens))
-    # ==============================================================================
+# ==============================================================================
 # PARTE 7: REGLAS DE CONTEO Y AGRUPACIÓN DE DESCRIPTORES
 # ==============================================================================
 # Esta sección define la lógica central de agrupación y conteo:
@@ -1180,6 +1159,10 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
     5. Para comercio 20, agrega variantes de asalto según el tipo
        (persona, comercio, vivienda, transporte).
     6. Filtra aliases que sean no productivos.
+
+    NOTA: "no_se_observan_delitos_ambientales" NO se incluye como alias
+    porque es una opción no productiva que debe ser filtrada por
+    is_unproductive_option.
 
     Parámetros:
         file_type (str): Tipo de archivo.
@@ -1336,7 +1319,8 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "cobros_gota_a_gota",
         },
 
-        # Comunidad 27: delitos ambientales
+        # Comunidad 27: delitos ambientales (SOLO variantes de contaminación de aguas,
+        # NO se incluye "no_se_observan_delitos_ambientales" porque es opción no productiva)
         "envenenamiento_de_aguas": {
             "envenenamiento_de_aguas",
             "envenenamiento_o_contaminacion_de_aguas",
@@ -1354,9 +1338,6 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "envenenamiento_o_contaminacion_de_aguas",
             "contaminacion_de_aguas",
             "contaminacion_o_envenenamiento_de_aguas",
-        },
-        "no_se_observan_delitos_ambientales": {
-            "no_se_observan_delitos_ambientales",
         },
 
         "ventas_informales_ambulantes": {"ventas_informales_ambulantes"},
@@ -1484,7 +1465,9 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
       prostitución.
     - Comercio 18: extorsión (variantes con "extors"/"extorc"/"exigencias").
     - Comercio 20: asaltos por tipo (persona, comercio, vivienda, transporte).
-    - Comunidad 27: envenenamiento/contaminación de aguas, no observa ambientales.
+    - Comunidad 27: envenenamiento/contaminación de aguas.
+      NOTA: "no_se_observan_delitos_ambientales" NO se agrupa aquí porque
+      es una opción no productiva que se filtra antes del conteo.
     - Policial/Policía: préstamos gota a gota (cualquier variante).
 
     Parámetros:
@@ -1541,7 +1524,9 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
         if ("transporte" in base) or ("bus" in base) or ("autobus" in base):
             return "Asalto a transporte público", "merged"
 
-    # Comunidad 27: unificar variantes ambientales
+    # Comunidad 27: unificar variantes de contaminación de aguas.
+    # "no_se_observan_delitos_ambientales" NO se incluye aquí:
+    # es opción no productiva y se filtra por is_unproductive_option.
     if file_type == "comunidad" and question_num == "27":
         if base in {
             "envenenamiento_de_aguas",
@@ -1550,8 +1535,6 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
             "contaminacion_o_envenenamiento_de_aguas",
         }:
             return "Envenenamiento o contaminación de aguas", "merged"
-        if base == "no_se_observan_delitos_ambientales":
-            return "No se observan delitos ambientales", "merged"
 
     # Policial / Policía: unificar gota a gota y evitar duplicados visuales
     if file_type in {"policial", "policia"}:
@@ -1735,7 +1718,7 @@ def find_unmapped_tokens(series: pd.Series, matched_aliases_union: set, file_typ
                 counter[token] += 1
 
     return counter, blank_rows
-    # ==============================================================================
+# ==============================================================================
 # PARTE 8: REGLAS ESPECIALES CRUZADAS ENTRE PREGUNTAS Y FUNCIÓN PRINCIPAL DE
 #          PROCESAMIENTO
 # ==============================================================================
@@ -1911,7 +1894,9 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
     - P20 comercio: asaltos por tipo de objetivo.
     - P21 comercio / P23 comunidad: estafa/fraude.
     - P12 comunidad: prostitución.
-    - P27 comunidad: delitos ambientales.
+    - P27 comunidad: delitos ambientales (SOLO envenenamiento/contaminación
+      de aguas; "no_se_observan_delitos_ambientales" se filtra como opción
+      no productiva y NO se refuerza).
     - Policial/Policía (cualquier pregunta): préstamos gota a gota.
 
     Parámetros:
@@ -2165,7 +2150,11 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                     }
                     group_info["aliases"].update(extra_gota)
 
-        # Comunidad 27: delitos ambientales
+        # Comunidad 27: delitos ambientales.
+        # SOLO se refuerzan las variantes de envenenamiento/contaminación de aguas.
+        # "no_se_observan_delitos_ambientales" NO se refuerza aquí porque
+        # ya fue filtrado como opción no productiva por is_unproductive_option
+        # (contiene "no_se_observan" que está en PATRONES_NO_OBSERVA).
         if file_type == "comunidad" and preg_num == "27":
             csv_tokens = set()
             for val in series:
@@ -2185,13 +2174,6 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                         }
                     }
                     group_info["aliases"].update(extra_aguas)
-
-                if desc_norm == "no_se_observan_delitos_ambientales":
-                    extra_no = {
-                        tok for tok in csv_tokens
-                        if tok == "no_se_observan_delitos_ambientales"
-                    }
-                    group_info["aliases"].update(extra_no)
 
         # P21 comercio / P23 comunidad: estafa/fraude
         if (
