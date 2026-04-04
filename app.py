@@ -2402,9 +2402,10 @@ def render_totals_tables(df: pd.DataFrame):
         })
 
         def color_rows(row):
-            if row.name % 2 == 0:
-                return ["background-color: #1e1e1e"] * len(row)
-            return ["background-color: #2a2a2a"] * len(row)
+             if row.name % 2 == 0:
+            return ["background-color: #1d3557"] * len(row)  # Azul oscuro
+              else:
+            return ["background-color: #2a9d8f"] * len(row)  # Verde suave
 
         styled_df = (
             show_df.style
