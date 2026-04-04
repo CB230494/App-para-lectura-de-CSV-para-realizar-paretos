@@ -515,6 +515,14 @@ def split_multiselect_cell(value: str):
     return parts
 
 
+def is_q27_no_observa_ambiental(token_norm: str, file_type: str = "", question_num: str = "") -> bool:
+    return (
+        file_type == "comunidad"
+        and str(question_num) == "27"
+        and token_norm == "no_se_observan_delitos_ambientales"
+    )
+
+
 def is_no_observa_option(token_norm: str) -> bool:
     for p in PATRONES_NO_OBSERVA:
         if p in token_norm:
@@ -522,7 +530,10 @@ def is_no_observa_option(token_norm: str) -> bool:
     return False
 
 
-def is_unproductive_option(token_norm: str) -> bool:
+def is_unproductive_option(token_norm: str, file_type: str = "", question_num: str = "") -> bool:
+    if is_q27_no_observa_ambiental(token_norm, file_type, question_num):
+        return False
+
     if token_norm in OPCIONES_NO_PRODUCTIVAS:
         return True
     if token_norm.startswith("otro_") or token_norm.startswith("otros_"):
@@ -532,7 +543,7 @@ def is_unproductive_option(token_norm: str) -> bool:
     return False
 
 
-def tokenize_cell_unique(value: str):
+def tokenize_cell_unique(value: str, file_type: str = "", question_num: str = ""):
     options = split_multiselect_cell(value)
     tokens = []
 
@@ -540,7 +551,7 @@ def tokenize_cell_unique(value: str):
         token = normalize_token_for_compare(opt)
         if not token or token in TOKENS_IGNORAR:
             continue
-        if is_unproductive_option(token):
+        if is_unproductive_option(token, file_type=file_type, question_num=str(question_num)):
             continue
         tokens.append(token)
 
@@ -712,6 +723,29 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             "cobros_gota_a_gota",
         },
 
+        # Comunidad 27: delitos ambientales
+        "envenenamiento_de_aguas": {
+            "envenenamiento_de_aguas",
+            "envenenamiento_o_contaminacion_de_aguas",
+            "contaminacion_de_aguas",
+            "contaminacion_o_envenenamiento_de_aguas",
+        },
+        "envenenamiento_o_contaminacion_de_aguas": {
+            "envenenamiento_de_aguas",
+            "envenenamiento_o_contaminacion_de_aguas",
+            "contaminacion_de_aguas",
+            "contaminacion_o_envenenamiento_de_aguas",
+        },
+        "contaminacion_de_aguas": {
+            "envenenamiento_de_aguas",
+            "envenenamiento_o_contaminacion_de_aguas",
+            "contaminacion_de_aguas",
+            "contaminacion_o_envenenamiento_de_aguas",
+        },
+        "no_se_observan_delitos_ambientales": {
+            "no_se_observan_delitos_ambientales",
+        },
+
         "ventas_informales_ambulantes": {"ventas_informales_ambulantes"},
         "problemas_vecinales_o_conflictos_entre_vecinos": {"problemas_vecinales_o_conflictos_entre_vecinos"},
         "desvinculacion_escolar_desercion_escolar": {"desvinculacion_escolar_desercion_escolar"},
@@ -813,7 +847,10 @@ def build_descriptor_aliases(file_type: str, question_num: str, descriptor_text:
             })
 
     aliases = {normalize_token_for_compare(a) for a in aliases if a}
-    aliases = {a for a in aliases if not is_unproductive_option(a)}
+    aliases = {
+        a for a in aliases
+        if not is_unproductive_option(a, file_type=file_type, question_num=str(question_num))
+    }
     return aliases
 
 
@@ -860,6 +897,18 @@ def get_exact_canonical_group(file_type: str, question_num: str, descriptor_text
             return "Asalto a vivienda", "merged"
         if ("transporte" in base) or ("bus" in base) or ("autobus" in base):
             return "Asalto a transporte público", "merged"
+
+    # Comunidad 27: unificar ambiental aguas + no observan
+    if file_type == "comunidad" and question_num == "27":
+        if base in {
+            "envenenamiento_de_aguas",
+            "envenenamiento_o_contaminacion_de_aguas",
+            "contaminacion_de_aguas",
+            "contaminacion_o_envenenamiento_de_aguas",
+        }:
+            return "Envenenamiento o contaminación de aguas", "merged"
+        if base == "no_se_observan_delitos_ambientales":
+            return "No se observan delitos ambientales", "merged"
 
     # Policial / Policía: gota a gota + evitar duplicados visuales
     if file_type in {"policial", "policia"}:
@@ -918,12 +967,12 @@ def build_group_definitions(file_type: str, question_num: str, question_text: st
     return groups
 
 
-def count_group_exact(series: pd.Series, aliases: set):
+def count_group_exact(series: pd.Series, aliases: set, file_type: str = "", question_num: str = ""):
     total = 0
     matched_tokens = Counter()
 
     for val in series:
-        row_tokens = tokenize_cell_unique(val)
+        row_tokens = tokenize_cell_unique(val, file_type=file_type, question_num=str(question_num))
         row_hit_tokens = set()
 
         for token in row_tokens:
@@ -937,12 +986,12 @@ def count_group_exact(series: pd.Series, aliases: set):
     return total, matched_tokens
 
 
-def count_group_unified(series: pd.Series, aliases: set):
+def count_group_unified(series: pd.Series, aliases: set, file_type: str = "", question_num: str = ""):
     total = 0
     matched_tokens = Counter()
 
     for val in series:
-        row_tokens = tokenize_cell_unique(val)
+        row_tokens = tokenize_cell_unique(val, file_type=file_type, question_num=str(question_num))
         row_hit_tokens = set()
 
         for token in row_tokens:
@@ -957,19 +1006,19 @@ def count_group_unified(series: pd.Series, aliases: set):
     return total, matched_tokens
 
 
-def find_unmapped_tokens(series: pd.Series, matched_aliases_union: set):
+def find_unmapped_tokens(series: pd.Series, matched_aliases_union: set, file_type: str = "", question_num: str = ""):
     counter = Counter()
     blank_rows = 0
 
     for val in series:
-        row_tokens = tokenize_cell_unique(val)
+        row_tokens = tokenize_cell_unique(val, file_type=file_type, question_num=str(question_num))
 
         if not row_tokens:
             blank_rows += 1
             continue
 
         for token in row_tokens:
-            if token not in matched_aliases_union and not is_unproductive_option(token):
+            if token not in matched_aliases_union and not is_unproductive_option(token, file_type=file_type, question_num=str(question_num)):
                 counter[token] += 1
 
     return counter, blank_rows
@@ -1126,7 +1175,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         if not is_exact_question(file_type, preg_num):
             csv_tokens = set()
             for val in series:
-                csv_tokens.update(tokenize_cell_unique(val))
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
 
             known_unified = UNIFIED_EXTRA_ALIASES.get((file_type, preg_num), set())
             if known_unified:
@@ -1137,7 +1186,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         if file_type == "comercio" and preg_num == "20":
             csv_tokens = set()
             for val in series:
-                csv_tokens.update(tokenize_cell_unique(val))
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
 
             for group_label, group_info in group_defs.items():
                 desc_norm = normalize_token_for_compare(group_label)
@@ -1158,7 +1207,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         if file_type == "comunidad" and preg_num == "12":
             csv_tokens = set()
             for val in series:
-                csv_tokens.update(tokenize_cell_unique(val))
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
 
             for group_label, group_info in group_defs.items():
                 desc_norm = normalize_token_for_compare(group_label)
@@ -1169,7 +1218,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         if file_type == "comercio" and preg_num == "18":
             csv_tokens = set()
             for val in series:
-                csv_tokens.update(tokenize_cell_unique(val))
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
 
             for group_label, group_info in group_defs.items():
                 desc_norm = normalize_token_for_compare(group_label)
@@ -1193,7 +1242,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         if file_type == "comercio" and preg_num == "19":
             csv_tokens = set()
             for val in series:
-                csv_tokens.update(tokenize_cell_unique(val))
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
 
             for _, group_info in group_defs.items():
                 extra_drogas = {
@@ -1213,7 +1262,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         if preg_num == "13" and file_type in {"comunidad", "comercio"}:
             csv_tokens = set()
             for val in series:
-                csv_tokens.update(tokenize_cell_unique(val))
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
 
             for _, group_info in group_defs.items():
                 extra_oferta = {
@@ -1233,7 +1282,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         ):
             csv_tokens = set()
             for val in series:
-                csv_tokens.update(tokenize_cell_unique(val))
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
 
             for _, group_info in group_defs.items():
                 extra_infra = {
@@ -1250,7 +1299,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         if file_type == "comercio" and preg_num == "15":
             csv_tokens = set()
             for val in series:
-                csv_tokens.update(tokenize_cell_unique(val))
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
 
             for _, group_info in group_defs.items():
                 extra_social = {
@@ -1268,7 +1317,7 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
         if file_type in {"policial", "policia"}:
             csv_tokens = set()
             for val in series:
-                csv_tokens.update(tokenize_cell_unique(val))
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
 
             for group_label, group_info in group_defs.items():
                 desc_norm = normalize_token_for_compare(group_label)
@@ -1289,13 +1338,41 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                     }
                     group_info["aliases"].update(extra_gota)
 
+        # Comunidad 27: refuerzo dinámico ambiental
+        if file_type == "comunidad" and preg_num == "27":
+            csv_tokens = set()
+            for val in series:
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
+
+            for group_label, group_info in group_defs.items():
+                desc_norm = normalize_token_for_compare(group_label)
+
+                if "envenenamiento" in desc_norm or "contaminacion_de_aguas" in desc_norm:
+                    extra_aguas = {
+                        tok for tok in csv_tokens
+                        if tok in {
+                            "envenenamiento_de_aguas",
+                            "envenenamiento_o_contaminacion_de_aguas",
+                            "contaminacion_de_aguas",
+                            "contaminacion_o_envenenamiento_de_aguas",
+                        }
+                    }
+                    group_info["aliases"].update(extra_aguas)
+
+                if desc_norm == "no_se_observan_delitos_ambientales":
+                    extra_no = {
+                        tok for tok in csv_tokens
+                        if tok == "no_se_observan_delitos_ambientales"
+                    }
+                    group_info["aliases"].update(extra_no)
+
         if (
             (file_type == "comunidad" and preg_num == "23")
             or (file_type == "comercio" and preg_num == "21")
         ):
             csv_tokens = set()
             for val in series:
-                csv_tokens.update(tokenize_cell_unique(val))
+                csv_tokens.update(tokenize_cell_unique(val, file_type=file_type, question_num=str(preg_num)))
 
             for group_label, group_info in group_defs.items():
                 if normalize_token_for_compare(group_label) == "estafa":
@@ -1311,11 +1388,17 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
 
             if is_exact_question(file_type, preg_num):
                 if group_info.get("group_mode") == "merged":
-                    total, matched_tokens = count_group_unified(series, aliases)
+                    total, matched_tokens = count_group_unified(
+                        series, aliases, file_type=file_type, question_num=str(preg_num)
+                    )
                 else:
-                    total, matched_tokens = count_group_exact(series, aliases)
+                    total, matched_tokens = count_group_exact(
+                        series, aliases, file_type=file_type, question_num=str(preg_num)
+                    )
             else:
-                total, matched_tokens = count_group_unified(series, aliases)
+                total, matched_tokens = count_group_unified(
+                    series, aliases, file_type=file_type, question_num=str(preg_num)
+                )
 
             results.append({
                 "archivo": filename,
@@ -1342,7 +1425,12 @@ def build_results_for_file(df_csv: pd.DataFrame, filename: str, guide: dict):
                 "motivo": f"Conteo {mode_label} según regla de la pregunta",
             })
 
-        unmapped_counter, blank_rows = find_unmapped_tokens(series, matched_aliases_union)
+        unmapped_counter, blank_rows = find_unmapped_tokens(
+            series,
+            matched_aliases_union,
+            file_type=file_type,
+            question_num=str(preg_num),
+        )
 
         for token, cnt in unmapped_counter.items():
             unmapped_options_rows.append({
